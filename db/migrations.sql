@@ -36,9 +36,9 @@ CREATE TABLE games (
 CREATE TABLE pick_results (
     pick_id INT PRIMARY KEY REFERENCES picks(pick_id) ON DELETE CASCADE,
     game_id TEXT REFERENCES games(game_id),
-    is_valid BOOLEAN NOT NULL DEFAULT TRUE,  -- e.g., duplicate-team violation
+    is_valid BOOLEAN NOT NULL DEFAULT TRUE,
     is_locked BOOLEAN NOT NULL DEFAULT FALSE,
-    survived BOOLEAN                         -- null until game final; true/false afterwards
+    survived BOOLEAN
 );
 
 -- to prevent duplicate-team picks across the season

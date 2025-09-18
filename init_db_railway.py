@@ -28,10 +28,26 @@ def init_railway_db():
             sql_commands = f.read()
 
         with engine.begin() as conn:
-            commands = [cmd.strip() for cmd in sql_commands.split(';') if cmd.strip()]
+            # Remove comments and split by semicolon
+            lines = []
+            for line in sql_commands.split('\n'):
+                line = line.strip()
+                # Skip comment-only lines
+                if line.startswith('--') or not line:
+                    continue
+                # Remove inline comments
+                if '--' in line:
+                    line = line.split('--')[0].strip()
+                if line:
+                    lines.append(line)
+
+            # Join lines and split by semicolon
+            clean_sql = ' '.join(lines)
+            commands = [cmd.strip() for cmd in clean_sql.split(';') if cmd.strip()]
 
             for i, command in enumerate(commands, 1):
                 print(f"   Executing command {i}/{len(commands)}...")
+                print(f"   Command: {command[:50]}..." if len(command) > 50 else f"   Command: {command}")
                 conn.execute(text(command))
 
         print("✅ Railway database initialized!")
