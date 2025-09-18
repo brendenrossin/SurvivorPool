@@ -59,7 +59,8 @@ class ScoreUpdater:
             error_msg = f"Error during score update: {str(e)}"
             self.update_job_meta(db, "update_scores", "error", error_msg)
             print(error_msg)
-            raise
+            print("⚠️  Continuing despite score update error")
+            return False  # Don't raise, just return False
         finally:
             db.close()
 

@@ -43,9 +43,23 @@ def main():
     try:
         summary = get_summary_data(SEASON)
         meme_stats = get_meme_stats(SEASON)
+        data_loaded = True
     except Exception as e:
-        st.error(f"Error loading data: {e}")
-        st.stop()
+        st.warning(f"⚠️ Database not fully populated yet: {e}")
+        st.info("🚀 App is starting up! Data will appear once Google Sheets access is configured.")
+        # Create empty data structure for demo
+        summary = {
+            "season": SEASON,
+            "weeks": [],
+            "entrants_total": 0,
+            "entrants_remaining": 0,
+            "last_updates": {}
+        }
+        meme_stats = {
+            "dumbest_picks": [],
+            "big_balls_picks": []
+        }
+        data_loaded = False
 
     # Main dashboard layout
     col1, col2 = st.columns([1, 2])

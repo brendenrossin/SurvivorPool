@@ -56,7 +56,8 @@ class SheetIngestor:
             error_msg = f"Error during sheet ingestion: {str(e)}"
             self.update_job_meta(db, "ingest_sheet", "error", error_msg)
             print(error_msg)
-            raise
+            print("⚠️  Continuing despite sheet ingestion error (likely permissions)")
+            return False  # Don't raise, just return False
         finally:
             db.close()
 
