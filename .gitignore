@@ -1,6 +1,7 @@
 # Environment variables and secrets
 .env
 .env.local
+.env.local.real
 .env.development
 .env.production
 *.env
@@ -98,6 +99,11 @@ temp/
 
 # Local development database
 local_db/
+
+# Debug output and local testing
+debug_output/
+requirements-local.txt
+test_env/
 
 # Streamlit cache
 .streamlit/

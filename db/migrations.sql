@@ -1,13 +1,13 @@
 -- Survivor Pool Database Schema
 
 -- people playing
-CREATE TABLE players (
+CREATE TABLE IF NOT EXISTS players (
     player_id SERIAL PRIMARY KEY,
     display_name TEXT UNIQUE NOT NULL
 );
 
 -- raw picks as typed in the sheet (one row per player-week)
-CREATE TABLE picks (
+CREATE TABLE IF NOT EXISTS picks (
     pick_id SERIAL PRIMARY KEY,
     player_id INT REFERENCES players(player_id),
     season INT NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE picks (
 );
 
 -- canonical NFL games
-CREATE TABLE games (
+CREATE TABLE IF NOT EXISTS games (
     game_id TEXT PRIMARY KEY,   -- provider-native id or concat season/week/home/away
     season INT NOT NULL,
     week INT NOT NULL,
@@ -33,7 +33,7 @@ CREATE TABLE games (
 );
 
 -- results of picks evaluated against final winners
-CREATE TABLE pick_results (
+CREATE TABLE IF NOT EXISTS pick_results (
     pick_id INT PRIMARY KEY REFERENCES picks(pick_id) ON DELETE CASCADE,
     game_id TEXT REFERENCES games(game_id),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE,
@@ -47,7 +47,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_player_team_season
     WHERE team_abbr IS NOT NULL;
 
 -- metadata table for tracking job runs
-CREATE TABLE job_meta (
+CREATE TABLE IF NOT EXISTS job_meta (
     job_name TEXT PRIMARY KEY,
     last_success_at TIMESTAMPTZ,
     last_run_at TIMESTAMPTZ,
@@ -56,7 +56,7 @@ CREATE TABLE job_meta (
 );
 
 -- indexes for performance
-CREATE INDEX idx_picks_season_week ON picks(season, week);
-CREATE INDEX idx_games_season_week ON games(season, week);
-CREATE INDEX idx_games_status ON games(status);
-CREATE INDEX idx_pick_results_survived ON pick_results(survived);
+CREATE INDEX IF NOT EXISTS idx_picks_season_week ON picks(season, week);
+CREATE INDEX IF NOT EXISTS idx_games_season_week ON games(season, week);
+CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
+CREATE INDEX IF NOT EXISTS idx_pick_results_survived ON pick_results(survived);
