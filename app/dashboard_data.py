@@ -159,7 +159,7 @@ def get_meme_stats(season: int) -> Dict:
                 "eliminated_count": row.eliminated_count
             })
 
-        # Big balls picks (underdog wins - road team beating home team for now) - grouped by team
+        # Big balls picks (underdog wins - teams that were underdogs and won) - grouped by team
         big_balls_query = text("""
             SELECT
                 pi.week,
@@ -168,7 +168,13 @@ def get_meme_stats(season: int) -> Dict:
                 g.away_team,
                 g.home_score,
                 g.away_score,
-                COUNT(DISTINCT pi.player_id) as big_balls_count
+                g.point_spread,
+                g.favorite_team,
+                COUNT(DISTINCT pi.player_id) as big_balls_count,
+                CASE
+                    WHEN g.favorite_team IS NOT NULL AND g.favorite_team != pi.team_abbr THEN 1
+                    ELSE 0
+                END as was_underdog
             FROM picks pi
             JOIN pick_results pr ON pi.pick_id = pr.pick_id
             JOIN games g ON (
@@ -180,10 +186,15 @@ def get_meme_stats(season: int) -> Dict:
                 AND pr.survived = TRUE
                 AND g.home_score IS NOT NULL
                 AND g.away_score IS NOT NULL
-                AND pi.team_abbr = g.away_team  -- picked away team
-                AND g.away_score > g.home_score  -- away team won
-            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score
-            ORDER BY pi.week DESC
+                AND (
+                    -- Original criteria: away team wins (road wins)
+                    (pi.team_abbr = g.away_team AND g.away_score > g.home_score)
+                    OR
+                    -- New criteria: underdog wins (when we have spread data)
+                    (g.favorite_team IS NOT NULL AND g.favorite_team != pi.team_abbr)
+                )
+            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score, g.point_spread, g.favorite_team
+            ORDER BY was_underdog DESC, pi.week DESC
             LIMIT 5
         """)
 
@@ -191,11 +202,22 @@ def get_meme_stats(season: int) -> Dict:
 
         big_balls_picks = []
         for row in big_balls_results:
+            # Determine if this was a road win
+            road_win = row.team_abbr == row.away_team
+
+            # Determine if this was an underdog win
+            was_underdog = bool(row.was_underdog)
+
+            # Determine opponent
+            opponent = row.home_team if road_win else row.away_team
+
             big_balls_picks.append({
                 "week": row.week,
                 "team": row.team_abbr,
-                "opponent": row.home_team,
-                "road_win": True,
+                "opponent": opponent,
+                "road_win": road_win,
+                "was_underdog": was_underdog,
+                "point_spread": row.point_spread,
                 "big_balls_count": row.big_balls_count
             })
 

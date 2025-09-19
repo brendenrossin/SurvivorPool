@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.database import SessionLocal
 from api.models import Game, Pick, PickResult, JobMeta
 from api.score_providers import get_score_provider
+from api.odds_providers import get_odds_provider
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,9 +24,11 @@ class ScoreUpdater:
     def __init__(self):
         provider_name = os.getenv("SCORES_PROVIDER", "espn")
         self.score_provider = get_score_provider(provider_name)
+        odds_provider_name = os.getenv("ODDS_PROVIDER", "the_odds_api")
+        self.odds_provider = get_odds_provider(odds_provider_name)
         self.season = int(os.getenv("NFL_SEASON", 2025))
 
-    def run(self):
+    def run(self, fetch_odds=False):
         """Main score update process"""
         db = SessionLocal()
         try:
@@ -41,8 +44,16 @@ class ScoreUpdater:
             # Fetch games and scores
             games = self.score_provider.get_schedule_and_scores(self.season, current_week)
 
+            # Optionally fetch betting odds (for backwards compatibility or manual runs)
+            if fetch_odds:
+                print("🎰 Fetching odds along with scores...")
+                odds_data = self.odds_provider.get_nfl_odds(self.season, current_week)
+                games_with_odds = self.merge_odds_with_games(games, odds_data)
+            else:
+                games_with_odds = games
+
             # Update games in database
-            games_updated = self.upsert_games(db, games)
+            games_updated = self.upsert_games(db, games_with_odds)
 
             # Update pick results
             picks_updated = self.update_pick_results(db, current_week)
@@ -64,6 +75,26 @@ class ScoreUpdater:
         finally:
             db.close()
 
+    def merge_odds_with_games(self, games: list, odds_data: dict) -> list:
+        """Merge betting odds with game data"""
+        games_with_odds = []
+
+        for game in games:
+            # Create a key to match with odds data
+            game_key = f"{game.away_team}_at_{game.home_team}"
+
+            # Check if we have odds for this game
+            if game_key in odds_data:
+                odds = odds_data[game_key]
+                # Update game with odds
+                game.point_spread = odds.get("point_spread")
+                game.favorite_team = odds.get("favorite_team")
+                print(f"🎰 Added odds: {game.away_team} @ {game.home_team} - {odds.get('favorite_team')} -{odds.get('point_spread')}")
+
+            games_with_odds.append(game)
+
+        return games_with_odds
+
     def upsert_games(self, db: Session, games: list) -> int:
         """Create or update games in database"""
         updated_count = 0
@@ -77,6 +108,11 @@ class ScoreUpdater:
                 existing_game.home_score = game_data.home_score
                 existing_game.away_score = game_data.away_score
                 existing_game.winner_abbr = game_data.winner_abbr
+                # Update odds if available
+                if game_data.point_spread is not None:
+                    existing_game.point_spread = game_data.point_spread
+                if game_data.favorite_team is not None:
+                    existing_game.favorite_team = game_data.favorite_team
                 updated_count += 1
             else:
                 # Create new game
@@ -90,7 +126,9 @@ class ScoreUpdater:
                     status=game_data.status,
                     home_score=game_data.home_score,
                     away_score=game_data.away_score,
-                    winner_abbr=game_data.winner_abbr
+                    winner_abbr=game_data.winner_abbr,
+                    point_spread=game_data.point_spread,
+                    favorite_team=game_data.favorite_team
                 )
                 db.add(new_game)
                 updated_count += 1
@@ -193,5 +231,12 @@ class ScoreUpdater:
         db.commit()
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Update NFL scores")
+    parser.add_argument("--fetch-odds", action="store_true",
+                       help="Also fetch betting odds (uses API credits)")
+    args = parser.parse_args()
+
     updater = ScoreUpdater()
-    updater.run()
+    updater.run(fetch_odds=args.fetch_odds)

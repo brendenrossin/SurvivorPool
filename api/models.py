@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from api.database import Base
@@ -38,6 +38,9 @@ class Game(Base):
     home_score = Column(Integer)
     away_score = Column(Integer)
     winner_abbr = Column(String)
+    # Betting odds fields
+    point_spread = Column(Float)  # Positive = home team favored by this many points
+    favorite_team = Column(String)  # Which team is favored according to spread
 
     pick_results = relationship("PickResult", back_populates="game")
 

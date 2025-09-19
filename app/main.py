@@ -352,15 +352,32 @@ def render_meme_stats(meme_stats):
             st.info("🤡 **No eliminations yet!**\n\nDumbest picks will appear once players start getting eliminated. The worse the loss, the higher the shame!")
 
     with col2:
-        st.write("**Big Balls (Road Wins)**")
+        st.write("**Big Balls (Risky Wins)**")
         big_balls = meme_stats["big_balls_picks"]
 
         if big_balls:
             for i, pick in enumerate(big_balls[:3], 1):
-                st.write(f"{i}. **{pick['team']} @ {pick['opponent']}** ✅ - Week {pick['week']}")
-                st.write(f"   ({pick['big_balls_count']} pairs of huge nuts)")
+                # Create the matchup display
+                if pick['road_win']:
+                    matchup = f"{pick['team']} @ {pick['opponent']}"
+                else:
+                    matchup = f"{pick['team']} vs {pick['opponent']}"
+
+                # Add dog emoji for underdog wins
+                underdog_emoji = " 🐕" if pick.get('was_underdog', False) else ""
+
+                st.write(f"{i}. **{matchup}** ✅{underdog_emoji} - Week {pick['week']}")
+
+                # Show spread info if available
+                spread_info = ""
+                if pick.get('point_spread') and pick.get('was_underdog'):
+                    spread_info = f" (underdog by {pick['point_spread']} pts)"
+                elif pick['road_win']:
+                    spread_info = " (road win)"
+
+                st.write(f"   ({pick['big_balls_count']} pairs of huge nuts{spread_info})")
         else:
-            st.info("💪 **No road wins yet!**\n\nBig balls picks will show players who picked away teams that won. Road wins = ultimate confidence!")
+            st.info("💪 **No risky wins yet!**\n\nBig balls picks show road wins and underdog victories. The riskier the pick, the bigger the glory!")
 
 def render_footer(last_updates):
     """Render footer with update information"""

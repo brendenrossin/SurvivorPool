@@ -17,6 +17,9 @@ class Game:
     home_score: Optional[int] = None
     away_score: Optional[int] = None
     winner_abbr: Optional[str] = None
+    # Betting odds fields
+    point_spread: Optional[float] = None  # Positive = home team favored
+    favorite_team: Optional[str] = None
 
 class ScoreProvider(ABC):
     @abstractmethod
