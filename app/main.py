@@ -54,7 +54,7 @@ def main():
     )
 
     # Header
-    st.title(f"🏈 Survivor {SEASON} — Live Dashboard")
+    st.title(f"Survivor {SEASON} — Live Dashboard")
 
     # Live Scores Widget (top of page)
     try:
@@ -121,10 +121,10 @@ def main():
 
     # v1.5 Features Section
     st.divider()
-    st.header("🔥 v1.5 Features - Advanced Analytics")
+    st.header("v1.5 Features - Advanced Analytics")
 
     # Create tabs for v1.5 features
-    tab1, tab2, tab3 = st.tabs(["💀 Team of Doom", "⚰️ Graveyard", "🌪️ Chaos Meter"])
+    tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Chaos Meter"])
 
     with tab1:
         try:
@@ -155,7 +155,7 @@ def main():
 
 def render_remaining_players_donut(summary):
     """Render donut chart for remaining players"""
-    st.subheader("🎯 Players Remaining")
+    st.subheader("Players Remaining")
 
     remaining = summary["entrants_remaining"]
     total = summary["entrants_total"]
@@ -172,7 +172,8 @@ def render_remaining_players_donut(summary):
         labels=['Remaining', 'Eliminated'],
         values=[remaining, eliminated],
         hole=0.6,
-        marker_colors=['#28a745', '#dc3545']
+        marker_colors=['#28a745', '#dc3545'],
+        textinfo='label'  # Only show labels, not percentages
     )])
 
     fig.update_layout(
@@ -245,10 +246,10 @@ def render_weekly_picks_chart(summary):
 
 def render_player_search():
     """Render player search section"""
-    st.subheader("🔍 Find a Player")
+    st.subheader("Find a Player")
 
     # Search input
-    search_query = st.text_input("Enter player name:", placeholder="e.g., Brent Rossin")
+    search_query = st.text_input("Enter player name:", placeholder="e.g., Bishop Sankey")
 
     if search_query:
         # Search for matching players
@@ -297,12 +298,12 @@ def render_player_search():
 
 def render_meme_stats(meme_stats):
     """Render meme statistics section"""
-    st.subheader("🎭 Meme Stats")
+    st.subheader("Meme Stats")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.write("**🤡 Dumbest Picks (Season)**")
+        st.write("**Dumbest Picks (Season)**")
         dumbest = meme_stats["dumbest_picks"]
 
         if dumbest:
@@ -313,7 +314,7 @@ def render_meme_stats(meme_stats):
             st.info("🤡 **No eliminations yet!**\n\nDumbest picks will appear once players start getting eliminated. The worse the loss, the higher the shame!")
 
     with col2:
-        st.write("**💪 Big Balls (Road Wins)**")
+        st.write("**Big Balls (Road Wins)**")
         big_balls = meme_stats["big_balls_picks"]
 
         if big_balls:

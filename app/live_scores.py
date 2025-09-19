@@ -133,13 +133,13 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
             current_week += 1
 
     # Create compact live scores widget
-    with st.expander(f"🏈 Week {current_week} Live Scores", expanded=False):
+    with st.expander(f"Week {current_week} Live Scores", expanded=False):
 
         # Get live scores data
         live_scores = get_live_scores_data(db, current_season, current_week)
 
         if not live_scores:
-            st.info("🏈 **No games this week** - Game data will appear once loaded")
+            st.info("**No games this week** - Game data will appear once loaded")
             return
 
         # Check if we're showing all games or just picked games
@@ -147,7 +147,7 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
         if has_any_pickers:
             st.caption("Showing games for teams picked by players this week")
         else:
-            st.caption("📺 No picks yet - showing all games this week")
+            st.caption("No picks yet - showing all games this week")
 
         # Sort by game status priority (live games first, then by kickoff time)
         def sort_key(game):
