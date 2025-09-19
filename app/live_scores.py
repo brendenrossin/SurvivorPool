@@ -16,7 +16,15 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) 
     # Determine game status display
     if game.status == 'pre':
         status_display = f"🕐 {game.kickoff.strftime('%a %I:%M %p ET')}"
-        score_display = "vs"
+
+        # Show spread if available, otherwise "vs"
+        if game.point_spread and game.favorite_team:
+            if game.favorite_team == game.home_team:
+                score_display = f"vs ({game.home_team} -{game.point_spread})"  # Home favored
+            else:
+                score_display = f"vs ({game.favorite_team} -{game.point_spread})"  # Away favored
+        else:
+            score_display = "vs"
     elif game.status == 'in':
         status_display = "🔴 LIVE"
         score_display = f"{game.home_score} - {game.away_score}"

@@ -6,11 +6,13 @@ A cheap-to-run, single-page web app that auto-ingests weekly picks from Google S
 
 - 📊 **Google Sheets Integration**: Automatically ingests picks from Google Sheets
 - 🏈 **Live NFL Scores**: Fetches real-time game data from ESPN
+- 🎰 **Betting Odds Integration**: Real-time point spreads from The Odds API (free tier)
 - 📈 **Interactive Dashboard**: Streamlit-based dashboard with:
   - Remaining players donut chart
   - Weekly picks distribution (stacked bar chart)
   - Player search and history
-  - Meme stats (dumbest picks, big balls wins)
+  - Notable picks (dumbest picks, underdog wins with 🐕 emoji)
+  - Pool insights (Team of Doom, Graveyard, Elimination Tracker)
 - 🔄 **Automated Jobs**: Scheduled data ingestion and score updates
 - 🚀 **Lightweight**: Designed for free-tier hosting (Railway, Fly.io, etc.)
 
@@ -52,6 +54,9 @@ Required environment variables:
 - `GOOGLE_SHEETS_SPREADSHEET_ID`: Your Google Sheets ID
 - `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`: Base64-encoded service account JSON
 - `NFL_SEASON`: Current NFL season (e.g., 2025)
+
+Optional (for enhanced features):
+- `THE_ODDS_API_KEY`: The Odds API key for betting spreads (free tier available)
 
 ### 4. Google Sheets Setup
 
