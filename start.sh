@@ -4,6 +4,10 @@ echo "📝 Environment check:"
 echo "  PORT: $PORT"
 echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
 
+# Initialize database first
+echo "🗄️ Initializing database..."
+python init_db_railway.py
+
 # Default port if not set
 if [ -z "$PORT" ]; then
     PORT=8080

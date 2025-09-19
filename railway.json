@@ -5,7 +5,6 @@
   },
   "deploy": {
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10,
-    "startCommand": "python init_db_railway.py && streamlit run app/main.py --server.port=${PORT} --server.address=0.0.0.0"
+    "restartPolicyMaxRetries": 10
   }
 }
