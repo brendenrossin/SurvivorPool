@@ -1,0 +1,99 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "bash start.sh"
+
+[[services]]
+name = "survivor-pool-web"
+source = "."
+
+[[services]]
+name = "daily-odds-update"
+source = "."
+cron = "0 13 * * *"  # Daily at 8:00 AM EST (13:00 UTC)
+startCommand = "python cron/daily_odds_update.py"
+
+[[services]]
+name = "sheets-ingestion-daily"
+source = "."
+cron = "0 14 * * *"  # Daily at 9:00 AM EST (14:00 UTC)
+startCommand = "python cron/sheets_ingestion.py"
+
+[[services]]
+name = "sheets-ingestion-sunday"
+source = "."
+cron = "30 16 * * 0"  # Sunday at 11:30 AM EST (16:30 UTC)
+startCommand = "python cron/sheets_ingestion.py"
+
+[[services]]
+name = "score-update-sunday-1"
+source = "."
+cron = "0 17 * * 0"  # Sunday at 12:00 PM EST (17:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-2"
+source = "."
+cron = "0 18 * * 0"  # Sunday at 1:00 PM EST (18:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-3"
+source = "."
+cron = "0 19 * * 0"  # Sunday at 2:00 PM EST (19:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-4"
+source = "."
+cron = "0 20 * * 0"  # Sunday at 3:00 PM EST (20:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-5"
+source = "."
+cron = "0 21 * * 0"  # Sunday at 4:00 PM EST (21:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-6"
+source = "."
+cron = "0 22 * * 0"  # Sunday at 5:00 PM EST (22:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-7"
+source = "."
+cron = "0 23 * * 0"  # Sunday at 6:00 PM EST (23:00 UTC)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-8"
+source = "."
+cron = "0 0 * * 1"  # Monday at 7:00 PM EST (00:00 UTC Monday)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-9"
+source = "."
+cron = "0 1 * * 1"  # Monday at 8:00 PM EST (01:00 UTC Monday)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-sunday-10"
+source = "."
+cron = "0 2 * * 1"  # Monday at 9:00 PM EST (02:00 UTC Monday)
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-monday"
+source = "."
+cron = "0 2 * * 2"  # Tuesday at 9:00 PM EST (02:00 UTC Tuesday) - Monday Night Football
+startCommand = "python cron/score_update.py"
+
+[[services]]
+name = "score-update-thursday"
+source = "."
+cron = "0 2 * * 5"  # Friday at 9:00 PM EST (02:00 UTC Friday) - Thursday Night Football
+startCommand = "python cron/score_update.py"
