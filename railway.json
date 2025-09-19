@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "echo '🚀 Starting Survivor Pool...' && python app/startup_logger.py && echo '✅ Startup checks passed' && python init_db_railway.py && echo '✅ DB Init Complete' && (python jobs/ingest_sheet.py || echo '⚠️ Sheets access pending') && (python jobs/update_scores.py || echo '⚠️ Scores update skipped') && echo '🚀 Starting Streamlit...' && streamlit run app/main.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false",
+    "startCommand": "echo '🧪 MINIMAL TEST MODE' && streamlit run minimal_test.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
