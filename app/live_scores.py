@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-Live Scores Widget - Shows current week's games for picked teams only
+Live Scores Widget - Shows current week's games
+- When picks exist: shows games for picked teams only
+- When no picks exist: shows ALL games to make dashboard engaging
 """
 
 import streamlit as st
@@ -9,9 +11,46 @@ from datetime import datetime
 from typing import List, Dict, Any
 import os
 
+def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) -> Dict[str, Any]:
+    """Create display data for a single game"""
+    # Determine game status display
+    if game.status == 'pre':
+        status_display = f"🕐 {game.kickoff.strftime('%a %I:%M %p ET')}"
+        score_display = "vs"
+    elif game.status == 'in':
+        status_display = "🔴 LIVE"
+        score_display = f"{game.home_score} - {game.away_score}"
+    elif game.status == 'final':
+        status_display = "✅ FINAL"
+        score_display = f"{game.home_score} - {game.away_score}"
+        # Add winner indicator
+        if game.winner_abbr == game.home_team:
+            status_display += f" ({game.home_team} WINS)"
+        elif game.winner_abbr == game.away_team:
+            status_display += f" ({game.away_team} WINS)"
+    else:
+        status_display = game.status.upper()
+        score_display = f"{game.home_score or 0} - {game.away_score or 0}"
+
+    return {
+        'game_id': game.game_id,
+        'away_team': game.away_team,
+        'home_team': game.home_team,
+        'away_score': game.away_score or 0,
+        'home_score': game.home_score or 0,
+        'status': game.status,
+        'status_display': status_display,
+        'score_display': score_display,
+        'kickoff': game.kickoff,
+        'away_pickers': away_pickers,
+        'home_pickers': home_pickers,
+        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0
+    }
+
 def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dict[str, Any]]:
     """
     Get live scores for teams that players have picked this week
+    If no picks exist, show ALL games to make dashboard more engaging
     DATA ONLY FROM DATABASE - NO API CALLS!
     (API calls happen via cron jobs only)
     """
@@ -30,7 +69,20 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
         picks = picks_query.all()
 
         if not picks:
-            return []
+            # No picks yet - show ALL games for this week to make dashboard engaging
+            games_query = db.query(Game).filter(
+                Game.season == current_season,
+                Game.week == current_week
+            ).order_by(Game.kickoff)
+
+            games = games_query.all()
+
+            # Build live scores with no pickers (show all games)
+            live_scores = []
+            for game in games:
+                live_scores.append(create_game_display(game, [], []))
+
+            return live_scores
 
         # Get unique teams that were picked
         picked_teams = set(pick.Pick.team_abbr for pick in picks)
@@ -59,39 +111,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
                 if pick.Pick.team_abbr == game.away_team
             ]
 
-            # Determine game status display
-            if game.status == 'pre':
-                status_display = f"🕐 {game.kickoff.strftime('%a %I:%M %p ET')}"
-                score_display = "vs"
-            elif game.status == 'in':
-                status_display = "🔴 LIVE"
-                score_display = f"{game.home_score} - {game.away_score}"
-            elif game.status == 'final':
-                status_display = "✅ FINAL"
-                score_display = f"{game.home_score} - {game.away_score}"
-                # Add winner indicator
-                if game.winner_abbr == game.home_team:
-                    status_display += f" ({game.home_team} WINS)"
-                elif game.winner_abbr == game.away_team:
-                    status_display += f" ({game.away_team} WINS)"
-            else:
-                status_display = game.status.upper()
-                score_display = f"{game.home_score or 0} - {game.away_score or 0}"
-
-            live_scores.append({
-                'game_id': game.game_id,
-                'away_team': game.away_team,
-                'home_team': game.home_team,
-                'away_score': game.away_score or 0,
-                'home_score': game.home_score or 0,
-                'status': game.status,
-                'status_display': status_display,
-                'score_display': score_display,
-                'kickoff': game.kickoff,
-                'away_pickers': away_pickers,
-                'home_pickers': home_pickers,
-                'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0
-            })
+            live_scores.append(create_game_display(game, home_pickers, away_pickers))
 
         return live_scores
 
@@ -113,14 +133,20 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
             current_week += 1
 
     st.subheader(f"🏈 Live Scores - Week {current_week}")
-    st.caption("Showing games for teams picked by players this week")
 
     # Get live scores data
     live_scores = get_live_scores_data(db, current_season, current_week)
 
     if not live_scores:
-        st.info("🏈 **No games to show this week**\n\nPossible reasons:\n- No players have picked teams playing this week\n- Game data hasn't been loaded yet (check cron jobs)\n- It's early in the week and games haven't been scheduled")
+        st.info("🏈 **No games to show this week**\n\nPossible reasons:\n- Game data hasn't been loaded yet (check cron jobs)\n- It's early in the week and games haven't been scheduled")
         return
+
+    # Check if we're showing all games or just picked games
+    has_any_pickers = any(game['has_pickers'] for game in live_scores)
+    if has_any_pickers:
+        st.caption("Showing games for teams picked by players this week")
+    else:
+        st.caption("📺 No picks yet - showing all games this week to keep it interesting!")
 
     # Sort by game status priority (live games first, then by kickoff time)
     def sort_key(game):
