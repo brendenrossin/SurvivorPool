@@ -57,6 +57,31 @@ if [ $? -eq 1 ]; then
         echo "⚠️ NFL scores update failed, continuing anyway"
     fi
 
+    echo "🔄 Updating historical weeks with improved game completion logic..."
+    python -c "
+from jobs.update_scores import ScoreUpdater
+from api.database import SessionLocal
+
+print('Updating weeks 1-3 with improved game completion detection...')
+updater = ScoreUpdater()
+db = SessionLocal()
+
+try:
+    for week in [1, 2, 3]:
+        games = updater.score_provider.get_schedule_and_scores(2025, week)
+        games_updated = updater.upsert_games(db, games)
+        picks_updated = updater.update_pick_results(db, week)
+        print(f'Week {week}: Updated {games_updated} games, {picks_updated} pick results')
+
+    db.commit()
+    print('✅ Historical update completed')
+except Exception as e:
+    print(f'⚠️ Historical update failed: {e}')
+    db.rollback()
+finally:
+    db.close()
+"
+
     echo "🔄 Backfilling historical data if needed..."
     python backfill_historical.py
     if [ $? -eq 0 ]; then
@@ -77,6 +102,32 @@ if [ $? -eq 0 ]; then
 else
     echo "⚠️ Real data ingestion failed, using mock data (if available)"
 fi
+
+# Always ensure game winners are set with improved logic
+echo "🏆 Ensuring game winners are set with improved completion detection..."
+python -c "
+from jobs.update_scores import ScoreUpdater
+from api.database import SessionLocal
+
+print('Final check: Updating all weeks with improved game completion detection...')
+updater = ScoreUpdater()
+db = SessionLocal()
+
+try:
+    for week in [1, 2, 3]:
+        games = updater.score_provider.get_schedule_and_scores(2025, week)
+        games_updated = updater.upsert_games(db, games)
+        picks_updated = updater.update_pick_results(db, week)
+        print(f'Week {week}: Updated {games_updated} games, {picks_updated} pick results')
+
+    db.commit()
+    print('✅ Final game completion check completed')
+except Exception as e:
+    print(f'⚠️ Final update failed: {e}')
+    db.rollback()
+finally:
+    db.close()
+"
 
 echo "🚀 All data processing complete, starting Streamlit..."
 
