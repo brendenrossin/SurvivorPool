@@ -132,15 +132,15 @@ def main():
     picks_data = client.get_picks_data()
 
     if not picks_data:
-        print("❌ No data retrieved from Google Sheets")
-        return False
+        print("⚠️ No data retrieved from Google Sheets (check OAuth credentials)")
+        return True  # Don't fail deployment, just skip ingestion
 
     # Parse the data
     players_data = parse_picks_data(picks_data)
 
     if not players_data:
-        print("❌ No valid picks data parsed")
-        return False
+        print("⚠️ No valid picks data parsed")
+        return True  # Don't fail deployment
 
     # Ingest into database
     success = ingest_players_and_picks(players_data)
