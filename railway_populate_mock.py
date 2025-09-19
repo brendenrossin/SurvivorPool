@@ -77,12 +77,21 @@ def main():
             all_teams = strong_teams + medium_teams
 
             eliminated_players = set()
+            # Track teams used by each player to prevent duplicates
+            player_teams_used = {player.player_id: set() for player in players}
 
             # WEEK 1: Completed with results
             print("🏈 Creating Week 1 picks and results...")
             week1_picks = []
             for player in players:
-                team = random.choice(strong_teams[:6])  # Safe early picks
+                # Pick a team this player hasn't used yet
+                available_teams = [t for t in strong_teams[:6] if t not in player_teams_used[player.player_id]]
+                if not available_teams:  # Fallback if somehow no teams available
+                    available_teams = strong_teams[:6]
+
+                team = random.choice(available_teams)
+                player_teams_used[player.player_id].add(team)
+
                 pick = Pick(
                     player_id=player.player_id,
                     season=2025,
@@ -116,7 +125,14 @@ def main():
             week2_picks = []
 
             for player in week2_players:
-                team = random.choice(strong_teams + medium_teams[:5])
+                # Pick a team this player hasn't used yet
+                available_teams = [t for t in (strong_teams + medium_teams[:5]) if t not in player_teams_used[player.player_id]]
+                if not available_teams:  # Fallback if no teams available
+                    available_teams = all_teams
+
+                team = random.choice(available_teams)
+                player_teams_used[player.player_id].add(team)
+
                 pick = Pick(
                     player_id=player.player_id,
                     season=2025,
@@ -152,7 +168,14 @@ def main():
             week3_picks = []
 
             for player in week3_players:
-                team = random.choice(all_teams)  # Any team for current week
+                # Pick a team this player hasn't used yet
+                available_teams = [t for t in all_teams if t not in player_teams_used[player.player_id]]
+                if not available_teams:  # Fallback if no teams available (very unlikely)
+                    available_teams = all_teams
+
+                team = random.choice(available_teams)
+                player_teams_used[player.player_id].add(team)
+
                 pick = Pick(
                     player_id=player.player_id,
                     season=2025,
