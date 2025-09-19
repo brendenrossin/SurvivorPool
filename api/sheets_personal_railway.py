@@ -44,6 +44,9 @@ def get_railway_personal_sheets_client():
 
     except Exception as e:
         print(f"❌ Failed to create Railway sheets client: {e}")
+        print(f"🔍 Debug info:")
+        print(f"   - GOOGLE_OAUTH_TOKEN_JSON present: {bool(os.getenv('GOOGLE_OAUTH_TOKEN_JSON'))}")
+        print(f"   - Token length: {len(os.getenv('GOOGLE_OAUTH_TOKEN_JSON', ''))}")
         import traceback
         traceback.print_exc()
         return None
