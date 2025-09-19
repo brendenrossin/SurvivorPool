@@ -85,7 +85,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
             return live_scores
 
         # Get unique teams that were picked
-        picked_teams = set(pick.Pick.team_abbr for pick in picks)
+        picked_teams = set(pick[0].team_abbr for pick in picks)
 
         # Get games for current week involving picked teams FROM DATABASE ONLY
         games_query = db.query(Game).filter(
@@ -103,12 +103,12 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
         for game in games:
             # Find who picked teams in this game
             home_pickers = [
-                pick.Player.display_name for pick in picks
-                if pick.Pick.team_abbr == game.home_team
+                pick[1] for pick in picks  # pick[1] is Player.display_name
+                if pick[0].team_abbr == game.home_team  # pick[0] is Pick
             ]
             away_pickers = [
-                pick.Player.display_name for pick in picks
-                if pick.Pick.team_abbr == game.away_team
+                pick[1] for pick in picks  # pick[1] is Player.display_name
+                if pick[0].team_abbr == game.away_team  # pick[0] is Pick
             ]
 
             live_scores.append(create_game_display(game, home_pickers, away_pickers))
@@ -173,13 +173,29 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                         else:
                             status_emoji = "🕐"
 
-                        # Show away @ home with score
-                        game_display = f"{status_emoji} **{game['away_team']}** @ **{game['home_team']}**"
+                        # Show team logos with score
+                        from api.team_logos import get_team_logo_url
 
-                        if game['status'] != 'pre':
-                            game_display += f" ({game['score_display']})"
+                        away_logo = get_team_logo_url(game['away_team'])
+                        home_logo = get_team_logo_url(game['home_team'])
 
-                        st.write(game_display)
+                        # Create a mobile-optimized display
+                        col1, col2, col3 = st.columns([1, 1, 1])
+
+                        with col1:
+                            st.image(away_logo, width=30)
+                            st.caption(game['away_team'])
+
+                        with col2:
+                            st.write(f"{status_emoji}")
+                            if game['status'] != 'pre':
+                                st.write(f"**{game['score_display']}**")
+                            else:
+                                st.write("vs")
+
+                        with col3:
+                            st.image(home_logo, width=30)
+                            st.caption(game['home_team'])
 
                         # Show pickers if any
                         all_pickers = game['away_pickers'] + game['home_pickers']

@@ -17,6 +17,7 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
 
     try:
         # Get all eliminated players - those with at least one pick that didn't survive
+        # Use team/week matching since game_id may not be set correctly
         eliminated_query = db.query(
             Player.display_name,
             Pick.week,
@@ -32,10 +33,14 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
         ).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).join(
-            Game, PickResult.game_id == Game.game_id
+            Game, (Game.home_team == Pick.team_abbr) | (Game.away_team == Pick.team_abbr)
         ).filter(
             Pick.season == current_season,
-            PickResult.survived == False  # Only eliminated picks
+            Game.season == current_season,
+            Game.week == Pick.week,
+            PickResult.survived == False,  # Only eliminated picks
+            Game.home_score.isnot(None),
+            Game.away_score.isnot(None)  # Only games with scores
         ).order_by(Pick.week, Player.display_name)
 
         eliminated = eliminated_query.all()

@@ -18,9 +18,10 @@ def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
 
     try:
         # Get all picks that resulted in elimination (survived = False)
+        # Use team/week matching since game_id may not be set correctly
         eliminated_picks_query = db.query(
             Pick.team_abbr,
-            Game.week,
+            Pick.week,
             Player.display_name,
             Game.home_team,
             Game.away_team,
@@ -30,12 +31,16 @@ def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
         ).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).join(
-            Game, PickResult.game_id == Game.game_id
+            Game, (Game.home_team == Pick.team_abbr) | (Game.away_team == Pick.team_abbr)
         ).join(
             Player, Pick.player_id == Player.player_id
         ).filter(
             Pick.season == current_season,
-            PickResult.survived == False  # Only eliminated picks
+            Game.season == current_season,
+            Game.week == Pick.week,
+            PickResult.survived == False,  # Only eliminated picks
+            Game.home_score.isnot(None),
+            Game.away_score.isnot(None)  # Only games with scores
         )
 
         eliminated_picks = eliminated_picks_query.all()

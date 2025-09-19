@@ -42,7 +42,8 @@ def main():
     st.set_page_config(
         page_title=f"Survivor {SEASON} - Live Dashboard",
         page_icon="🏈",
-        layout="wide"
+        layout="wide",
+        initial_sidebar_state="collapsed"  # Better for mobile
     )
 
     # Header
@@ -93,27 +94,32 @@ def main():
         }
         data_loaded = False
 
-    # Main dashboard layout
-    col1, col2 = st.columns([1, 2])
+    # Main dashboard layout - Weekly picks chart as main focus
+    render_weekly_picks_chart(summary)
+
+    st.divider()
+
+    # Secondary layout - Mobile-optimized: stack on small screens
+    col1, col2 = st.columns([1, 1])
 
     with col1:
         # Donut chart - Remaining players
         render_remaining_players_donut(summary)
 
+    with col2:
         # Player search
         render_player_search()
 
-    with col2:
-        # Weekly picks chart
-        render_weekly_picks_chart(summary)
+    # Add some mobile spacing
+    st.write("")
 
     # Meme stats section
     st.divider()
     render_meme_stats(meme_stats)
 
-    # v1.5 Features Section
+    # Pool Insights Section
     st.divider()
-    st.header("v1.5 Features - Advanced Analytics")
+    st.header("Pool Insights")
 
     # Create tabs for v1.5 features
     tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Chaos Meter"])
@@ -170,9 +176,10 @@ def render_remaining_players_donut(summary):
 
     fig.update_layout(
         annotations=[dict(text=f"{percentage:.1f}%<br>{remaining}/{total}",
-                         x=0.5, y=0.5, font_size=20, showarrow=False)],
+                         x=0.5, y=0.5, font_size=16, showarrow=False)],  # Smaller font for mobile
         showlegend=True,
-        height=300,
+        height=250,  # Reduced height for mobile
+        font=dict(size=10),  # Smaller overall font
         margin=dict(t=0, b=0, l=0, r=0)
     )
 
@@ -180,7 +187,6 @@ def render_remaining_players_donut(summary):
 
 def render_weekly_picks_chart(summary):
     """Render stacked bar chart for weekly picks"""
-    st.subheader("📊 Weekly Picks Distribution")
 
     if not summary["weeks"]:
         st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
@@ -210,28 +216,57 @@ def render_weekly_picks_chart(summary):
 
     df = pd.DataFrame(chart_data)
 
+    # Sort data to ensure largest stack components are on bottom
+    # Group by Week and sort by Count within each week (largest first = bottom of stack)
+    df_sorted = df.sort_values(['Week', 'Count'], ascending=[True, False])
+
     # Create stacked bar chart
     fig = px.bar(
-        df,
+        df_sorted,
         x="Week",
         y="Count",
         color="Team",
         color_discrete_map={team: color for team, color in
-                           zip(df["Team"], df["Color"])},
-        title="Team Picks by Week"
+                           zip(df_sorted["Team"], df_sorted["Color"])},
+        title="📊 Team Picks by Week",
+        category_orders={"Team": df_sorted.sort_values('Count', ascending=False)['Team'].unique()}
     )
 
+    # Add text annotations for teams with >10 picks
+    for trace in fig.data:
+        team_name = trace.name
+        team_data = df_sorted[df_sorted["Team"] == team_name]
+
+        x_positions = []
+        y_positions = []
+        texts = []
+
+        for _, row in team_data.iterrows():
+            if row["Count"] >= 10:  # Only annotate if 10+ picks
+                x_positions.append(row["Week"])
+                y_positions.append(row["Count"] / 2)  # Middle of the bar
+                texts.append(team_name)
+
+        if x_positions:  # Only add annotations if there are any
+            fig.add_scatter(
+                x=x_positions,
+                y=y_positions,
+                text=texts,
+                mode="text",
+                textfont=dict(size=10, color="white"),
+                showlegend=False,
+                hoverinfo="skip"
+            )
+
     fig.update_layout(
-        height=400,
+        height=400,  # Reduced for mobile
         xaxis_title="Week",
-        yaxis_title="Number of Picks",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        yaxis_title="Picks",
+        font=dict(size=12),  # Better font size for mobile
+        showlegend=False,  # Remove legend for mobile
+        margin=dict(l=40, r=40, t=60, b=40),  # Reduced bottom margin since no legend
+        # Mobile-friendly responsive settings
+        autosize=True
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -290,7 +325,7 @@ def render_player_search():
 
 def render_meme_stats(meme_stats):
     """Render meme statistics section"""
-    st.subheader("Meme Stats")
+    st.subheader("Notable Picks")
 
     col1, col2 = st.columns(2)
 
@@ -300,8 +335,8 @@ def render_meme_stats(meme_stats):
 
         if dumbest:
             for i, pick in enumerate(dumbest[:3], 1):
-                st.write(f"{i}. **{pick['player']}** - Week {pick['week']}")
-                st.write(f"   {pick['team']} vs {pick['opponent']} (Lost by {pick['margin']})")
+                st.write(f"{i}. **{pick['team']} vs {pick['opponent']}** - Week {pick['week']}")
+                st.write(f"   Lost by {pick['margin']} ({pick['eliminated_count']} players eliminated)")
         else:
             st.info("🤡 **No eliminations yet!**\n\nDumbest picks will appear once players start getting eliminated. The worse the loss, the higher the shame!")
 
@@ -311,8 +346,8 @@ def render_meme_stats(meme_stats):
 
         if big_balls:
             for i, pick in enumerate(big_balls[:3], 1):
-                st.write(f"{i}. **{pick['player']}** - Week {pick['week']}")
-                st.write(f"   {pick['team']} @ {pick['opponent']} ✅")
+                st.write(f"{i}. **{pick['team']} @ {pick['opponent']}** ✅ - Week {pick['week']}")
+                st.write(f"   ({pick['big_balls_count']} pairs of huge nuts)")
         else:
             st.info("💪 **No road wins yet!**\n\nBig balls picks will show players who picked away teams that won. Road wins = ultimate confidence!")
 

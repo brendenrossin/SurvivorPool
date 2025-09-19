@@ -158,6 +158,15 @@ def main():
     if success:
         print("\n🎉 Personal OAuth2 ingestion successful!")
         print("🚀 Your dashboard should now show real survivor picks!")
+
+        # After successful ingestion, populate historical eliminations
+        print("\n🔄 Populating historical elimination data...")
+        try:
+            from manual_historical import mark_eliminations
+            mark_eliminations()
+            print("✅ Historical eliminations populated")
+        except Exception as e:
+            print(f"⚠️ Historical elimination population failed: {e}")
     else:
         print("\n❌ Personal OAuth2 ingestion failed")
 

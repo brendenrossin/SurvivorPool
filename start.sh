@@ -57,6 +57,14 @@ if [ $? -eq 1 ]; then
         echo "⚠️ NFL scores update failed, continuing anyway"
     fi
 
+    echo "🔄 Backfilling historical data if needed..."
+    python backfill_historical.py
+    if [ $? -eq 0 ]; then
+        echo "✅ Historical data backfilled successfully"
+    else
+        echo "⚠️ Historical backfill failed, continuing anyway"
+    fi
+
     echo "📱 Mock data population complete"
 fi
 
