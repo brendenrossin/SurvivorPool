@@ -34,6 +34,9 @@ from app.dashboard_data import (
     search_players
 )
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
+from app.team_of_doom import render_team_of_doom_widget
+from app.graveyard import render_graveyard_widget
+from app.chaos_meter import render_chaos_meter_widget
 
 # Load environment
 from dotenv import load_dotenv
@@ -115,6 +118,37 @@ def main():
     # Meme stats section
     st.divider()
     render_meme_stats(meme_stats)
+
+    # v1.5 Features Section
+    st.divider()
+    st.header("🔥 v1.5 Features - Advanced Analytics")
+
+    # Create tabs for v1.5 features
+    tab1, tab2, tab3 = st.tabs(["💀 Team of Doom", "⚰️ Graveyard", "🌪️ Chaos Meter"])
+
+    with tab1:
+        try:
+            db = SessionLocal()
+            render_team_of_doom_widget(db, SEASON)
+            db.close()
+        except Exception as e:
+            st.info("💀 Team of Doom will appear once eliminations start happening!")
+
+    with tab2:
+        try:
+            db = SessionLocal()
+            render_graveyard_widget(db, SEASON)
+            db.close()
+        except Exception as e:
+            st.info("⚰️ Graveyard will fill up as players get eliminated!")
+
+    with tab3:
+        try:
+            db = SessionLocal()
+            render_chaos_meter_widget(db, SEASON)
+            db.close()
+        except Exception as e:
+            st.info("🌪️ Chaos Meter will activate once games are completed!")
 
     # Footer with update times
     render_footer(summary.get("last_updates", {}))
