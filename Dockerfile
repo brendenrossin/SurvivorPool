@@ -1,4 +1,4 @@
-# Dockerfile for Railway deployment
+# Dockerfile for Railway deployment - FORCE REBUILD
 FROM python:3.11-slim
 
 # Set working directory

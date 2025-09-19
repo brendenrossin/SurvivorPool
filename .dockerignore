@@ -1,0 +1,16 @@
+# Docker ignore file to reduce build context
+.git
+.gitignore
+README.md
+*.md
+logs/
+debug_output/
+.env*
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
