@@ -149,19 +149,20 @@ class TheOddsAPIProvider(OddsProvider):
                     if home_outcome and away_outcome:
                         home_spread = float(home_outcome.get("point", 0))
 
-                        # Positive spread = home team favored
-                        # Negative spread = away team favored
-                        if home_spread < 0:
-                            # Away team favored
-                            return {
-                                "spread": abs(home_spread),
-                                "favorite": away_outcome.get("name")
-                            }
-                        else:
-                            # Home team favored
+                        # In betting: negative spread = favorite, positive = underdog
+                        # If home team has negative spread (e.g., -8.5), home team is favored
+                        # If home team has positive spread (e.g., +8.5), away team is favored
+                        if home_spread > 0:
+                            # Home team has positive spread = away team favored
                             return {
                                 "spread": home_spread,
-                                "favorite": home_outcome.get("name")
+                                "favorite": game.get("away_team")  # Away team name (not normalized)
+                            }
+                        else:
+                            # Home team has negative spread = home team favored
+                            return {
+                                "spread": abs(home_spread),
+                                "favorite": game.get("home_team")  # Home team name (not normalized)
                             }
 
         return None
