@@ -57,8 +57,19 @@ if [ $? -eq 1 ]; then
         echo "⚠️ NFL scores update failed, continuing anyway"
     fi
 
-    echo "📱 Data population complete, starting Streamlit..."
+    echo "📱 Mock data population complete"
 fi
+
+# Try to ingest real data from Google Sheets if OAuth is configured
+echo "📊 Attempting real data ingestion from Google Sheets..."
+python jobs/ingest_personal_sheets.py
+if [ $? -eq 0 ]; then
+    echo "✅ Real data ingested successfully from Google Sheets"
+else
+    echo "⚠️ Real data ingestion failed, using mock data"
+fi
+
+echo "🚀 All data processing complete, starting Streamlit..."
 
 exec streamlit run app/main.py \
     --server.port=$PORT \
