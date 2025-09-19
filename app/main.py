@@ -190,11 +190,11 @@ def render_weekly_picks_chart(summary):
     chart_data = []
     for week_data in summary["weeks"]:
         week = week_data["week"]
-        for team_data in week_data["teams"]:
-            team = team_data["team"]
-            count = team_data["count"]
+        for team_item in week_data["teams"]:
+            team = team_item["team"]
+            count = team_item["count"]
 
-            # Get team color
+            # Get team color from global team_data
             team_color = team_data["teams"].get(team, {}).get("color", "#666666")
 
             chart_data.append({
