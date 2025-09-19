@@ -192,6 +192,9 @@ def render_weekly_picks_chart(summary):
         st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
         return
 
+    # Load team data for colors
+    team_data = load_team_data()
+
     # Prepare data for stacked bar chart
     chart_data = []
     for week_data in summary["weeks"]:
@@ -200,7 +203,7 @@ def render_weekly_picks_chart(summary):
             team = team_item["team"]
             count = team_item["count"]
 
-            # Get team color from global team_data
+            # Get team color
             team_color = team_data["teams"].get(team, {}).get("color", "#666666")
 
             chart_data.append({
