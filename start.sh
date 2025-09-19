@@ -16,27 +16,43 @@ echo "🎯 Starting Streamlit on port $PORT"
 echo "📊 Checking if database needs initial data..."
 python -c "
 from api.database import SessionLocal
-from api.models import Player
+from api.models import Player, Pick
 try:
     db = SessionLocal()
     player_count = db.query(Player).count()
+    pick_count = db.query(Pick).count()
     db.close()
-    if player_count == 0:
-        print('🆕 Database is empty, will populate in background...')
+
+    print(f'📊 Current database state: {player_count} players, {pick_count} picks')
+
+    if player_count < 20 or pick_count < 50:
+        print('🆕 Database needs comprehensive data, will populate...')
         exit(1)
     else:
-        print(f'✅ Database has {player_count} players, skipping population')
+        print(f'✅ Database has sufficient data ({player_count} players, {pick_count} picks)')
         exit(0)
 except Exception as e:
-    print(f'⚠️ Database check failed: {e}, starting app anyway...')
-    exit(0)
+    print(f'⚠️ Database check failed: {e}, will try to populate anyway...')
+    exit(1)
 "
 
 if [ $? -eq 1 ]; then
     echo "🔄 Populating database with mock data..."
-    python populate_mock_simple.py || echo "⚠️ Mock data creation had issues"
+    python railway_populate_mock.py
+    if [ $? -eq 0 ]; then
+        echo "✅ Mock data created successfully"
+    else
+        echo "⚠️ Mock data creation failed, continuing anyway"
+    fi
+
     echo "🏈 Fetching NFL games..."
-    python jobs/update_scores.py || echo "⚠️ NFL scores update had issues"
+    python jobs/update_scores.py
+    if [ $? -eq 0 ]; then
+        echo "✅ NFL scores updated successfully"
+    else
+        echo "⚠️ NFL scores update failed, continuing anyway"
+    fi
+
     echo "📱 Data population complete, starting Streamlit..."
 fi
 
