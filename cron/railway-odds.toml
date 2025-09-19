@@ -1,0 +1,8 @@
+# Railway configuration for Daily Odds Update Cron Job
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/daily_odds_update.py"
+cronSchedule = "0 13 * * *"  # Daily at 8:00 AM EST (13:00 UTC)

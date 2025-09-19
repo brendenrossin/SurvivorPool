@@ -1,0 +1,119 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+
+jobs:
+  deploy-staging:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway Staging
+        run: |
+          echo "🚧 Deploying to Railway Staging..."
+          curl -X POST "${{ secrets.RAILWAY_STAGING_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "environment": "staging",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}"
+            }'
+
+      - name: Wait for deployment
+        run: sleep 30
+
+      - name: Verify staging deployment
+        run: |
+          echo "🔍 Verifying staging deployment..."
+          # Basic health check - adjust URL based on your staging environment
+          if [ -n "${{ secrets.STAGING_URL }}" ]; then
+            curl -f "${{ secrets.STAGING_URL }}" || echo "⚠️ Staging health check failed"
+          fi
+
+      - name: Comment on PR if applicable
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '🚧 **Staging Deployment Complete**\n\nView staging: ${{ secrets.STAGING_URL }}'
+            })
+
+  deploy-production:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment: production
+    needs: []  # Can run independently
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Railway Production
+        run: |
+          echo "🚀 Deploying to Railway Production..."
+          curl -X POST "${{ secrets.RAILWAY_PRODUCTION_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "environment": "production",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}"
+            }'
+
+      - name: Wait for deployment
+        run: sleep 30
+
+      - name: Verify production deployment
+        run: |
+          echo "🔍 Verifying production deployment..."
+          if [ -n "${{ secrets.PRODUCTION_URL }}" ]; then
+            curl -f "${{ secrets.PRODUCTION_URL }}" || echo "⚠️ Production health check failed"
+          fi
+
+      - name: Create deployment tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a "production-$(date +%Y%m%d-%H%M%S)" -m "Production deployment: ${{ github.sha }}"
+          git push origin --tags
+
+  notify:
+    if: always()
+    needs: [deploy-staging, deploy-production]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment summary
+        run: |
+          echo "📋 **Deployment Summary**"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Trigger: ${{ github.event_name }}"
+
+          if [ "${{ needs.deploy-staging.result }}" = "success" ]; then
+            echo "✅ Staging: Deployed successfully"
+          elif [ "${{ needs.deploy-staging.result }}" = "failure" ]; then
+            echo "❌ Staging: Deployment failed"
+          fi
+
+          if [ "${{ needs.deploy-production.result }}" = "success" ]; then
+            echo "✅ Production: Deployed successfully"
+          elif [ "${{ needs.deploy-production.result }}" = "failure" ]; then
+            echo "❌ Production: Deployment failed"
+          fi

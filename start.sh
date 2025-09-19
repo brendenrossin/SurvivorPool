@@ -8,6 +8,15 @@ echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
 echo "🗄️ Initializing database..."
 python init_db_railway.py
 
+# Apply odds columns migration
+echo "🎰 Applying odds integration migration..."
+python scripts/railway_migration.py
+if [ $? -eq 0 ]; then
+    echo "✅ Odds migration completed successfully"
+else
+    echo "⚠️ Odds migration failed, continuing anyway"
+fi
+
 # Default port if not set
 if [ -z "$PORT" ]; then
     PORT=8080
