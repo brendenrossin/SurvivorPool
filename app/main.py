@@ -9,9 +9,22 @@ import pandas as pd
 from datetime import datetime
 import os
 import sys
+import logging
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import startup logger
+from app.startup_logger import comprehensive_startup_check
+
+# Run comprehensive startup check
+print("🚀 Starting Survivor Pool Dashboard...")
+startup_success = comprehensive_startup_check()
+
+if not startup_success:
+    print("💥 Startup checks failed! See logs for details.")
+    st.error("❌ Application startup failed. Check server logs for details.")
+    st.stop()
 
 from app.dashboard_data import (
     load_team_data,
@@ -20,6 +33,7 @@ from app.dashboard_data import (
     get_meme_stats,
     search_players
 )
+from app.live_scores import render_live_scores_widget, render_compact_live_scores
 
 # Load environment
 from dotenv import load_dotenv
@@ -38,6 +52,29 @@ def main():
 
     # Header
     st.title(f"🏈 Survivor {SEASON} — Live Dashboard")
+
+    # Live Scores Widget (top of page)
+    try:
+        from api.database import SessionLocal
+        from api.models import Game
+
+        # Get current week from database (NO API CALLS!)
+        db = SessionLocal()
+
+        # Find the latest week with games in database
+        latest_week_result = db.query(Game.week).filter(
+            Game.season == SEASON
+        ).order_by(Game.week.desc()).first()
+
+        current_week = latest_week_result.week if latest_week_result else 1
+
+        # Render live scores from database only
+        render_live_scores_widget(db, SEASON, current_week)
+        db.close()
+
+        st.divider()
+    except Exception as e:
+        st.info("🏈 Live scores will appear once data is populated")
 
     # Load data
     try:
@@ -88,6 +125,11 @@ def render_remaining_players_donut(summary):
 
     remaining = summary["entrants_remaining"]
     total = summary["entrants_total"]
+
+    if total == 0:
+        st.info("🏈 **No players loaded yet**\n\nPlayer data will appear once Google Sheets picks are imported via the hourly cron job.")
+        return
+
     eliminated = total - remaining
     percentage = (remaining / total * 100) if total > 0 else 0
 
@@ -114,7 +156,7 @@ def render_weekly_picks_chart(summary):
     st.subheader("📊 Weekly Picks Distribution")
 
     if not summary["weeks"]:
-        st.info("No picks data available yet")
+        st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
         return
 
     # Prepare data for stacked bar chart
@@ -234,7 +276,7 @@ def render_meme_stats(meme_stats):
                 st.write(f"{i}. **{pick['player']}** - Week {pick['week']}")
                 st.write(f"   {pick['team']} vs {pick['opponent']} (Lost by {pick['margin']})")
         else:
-            st.info("No eliminated picks yet")
+            st.info("🤡 **No eliminations yet!**\n\nDumbest picks will appear once players start getting eliminated. The worse the loss, the higher the shame!")
 
     with col2:
         st.write("**💪 Big Balls (Road Wins)**")
@@ -245,7 +287,7 @@ def render_meme_stats(meme_stats):
                 st.write(f"{i}. **{pick['player']}** - Week {pick['week']}")
                 st.write(f"   {pick['team']} @ {pick['opponent']} ✅")
         else:
-            st.info("No road wins yet")
+            st.info("💪 **No road wins yet!**\n\nBig balls picks will show players who picked away teams that won. Road wins = ultimate confidence!")
 
 def render_footer(last_updates):
     """Render footer with update information"""
