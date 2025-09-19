@@ -1,48 +1,119 @@
-# Railway Cron Jobs Setup
+# Railway Cron Jobs Setup Guide
 
-After deploying to Railway, you'll need to set up cron jobs for automated data updates.
+This guide explains how to set up automated cron jobs for your SurvivorPool Railway deployment.
 
-## Method 1: Railway Cron (Recommended)
+## 🎯 What We Need to Schedule
 
-In your Railway dashboard:
+1. **Sheets Ingestion** (`cron_ingest_sheets.py`) - Every hour to get fresh picks
+2. **Score Updates** (`cron_update_scores.py`) - Every 30 minutes during game times
+3. **Weekly Backfill** (`cron_backfill.py`) - Daily to ensure data completeness
 
-1. **Go to your project → Add Service → Cron**
-2. **Create these cron jobs:**
+## 📋 Railway Dashboard Setup Steps
 
-### Sheet Ingestion (Daily 7 AM PT)
+### 1. Create Additional Services
+
+In your Railway project dashboard:
+
+1. **Go to your project** → `nfl-survivor-2025`
+2. **Click "Add Service"** → **"Empty Service"**
+3. **Create 5 new services** with these names:
+   - `sheets-cron`
+   - `scores-cron-sunday`
+   - `scores-cron-monday`
+   - `scores-cron-thursday`
+   - `backfill-cron` (optional - can remove after one-time use)
+
+### 2. Configure Each Cron Service
+
+For each cron service, you need to:
+
+#### A. Connect to GitHub Repository
+1. **Service Settings** → **Source** → **Connect Repository**
+2. **Select:** `brendenrossin/SurvivorPool`
+3. **Branch:** `main`
+
+#### B. Set Environment Variables
+1. **Service Settings** → **Variables**
+2. **Copy all variables from your main web service:**
+   - `DATABASE_URL` (Reference from web service)
+   - `GOOGLE_SHEETS_SPREADSHEET_ID`
+   - `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64`
+   - `NFL_SEASON=2025`
+   - `SCORES_PROVIDER=espn`
+   - `ENVIRONMENT=production`
+
+#### C. Configure Cron Schedule and Start Command
+
+**For `sheets-cron` service:**
+- **Settings** → **Cron Schedule:** `5 * * * *` (every hour at 5 past)
+- **Settings** → **Deploy** → **Start Command:** `python cron_ingest_sheets.py`
+
+**For `scores-cron` service:**
+Create **3 separate cron services** for different game schedules:
+
+**`scores-cron-sunday`:**
+- **Settings** → **Cron Schedule:** `*/15 * * * 0` (every 15 minutes on Sundays)
+- **Settings** → **Deploy** → **Start Command:** `python cron_update_scores.py`
+
+**`scores-cron-monday`:**
+- **Settings** → **Cron Schedule:** `*/15 1-5 * * 1` (every 15 min, 1-5 AM UTC = 5:30-9:30 PM PST Monday)
+- **Settings** → **Deploy** → **Start Command:** `python cron_update_scores.py`
+
+**`scores-cron-thursday`:**
+- **Settings** → **Cron Schedule:** `*/15 1-5 * * 4` (every 15 min, 1-5 AM UTC = 5:30-9:30 PM PST Thursday)
+- **Settings** → **Deploy** → **Start Command:** `python cron_update_scores.py`
+
+**For `backfill-cron` service:**
+- **Settings** → **Cron Schedule:** `0 6 * * *` (daily at 6 AM UTC = 2 AM ET)
+- **Settings** → **Deploy** → **Start Command:** `python cron_backfill.py`
+
+### 3. Deploy All Services
+
+After configuring each service:
+1. **Click "Deploy"** on each cron service
+2. **Monitor logs** to ensure they're working correctly
+
+## 📊 Cron Schedule Explanation
+
+| Service | Schedule | Frequency | Reasoning |
+|---------|----------|-----------|-----------|
+| **Sheets** | `5 * * * *` | Every hour at :05 | Keep picks data fresh without overwhelming the API |
+| **Scores** | `*/15 * * * 0` | Every 15 min on Sundays | Live score updates ONLY during game days (rate limit protection) |
+| **Backfill** | `0 6 * * *` | Daily 6 AM UTC | Clean up any missed data overnight |
+
+## 🔧 Alternative: Manual Cron Commands
+
+If you prefer to test manually first, you can run these commands in your Railway web service console:
+
 ```bash
-# Name: sheet-ingestion-daily
-# Schedule: 0 14 * * * (7 AM PT = 2 PM UTC)
-# Command: python jobs/ingest_sheet.py
+# Test sheets ingestion
+python cron_ingest_sheets.py
+
+# Test score updates
+python cron_update_scores.py
+
+# Test backfill
+python cron_backfill.py
 ```
 
-### Sheet Ingestion (Sunday 9:30 AM PT)
-```bash
-# Name: sheet-ingestion-sunday
-# Schedule: 30 16 * * 0 (9:30 AM PT = 4:30 PM UTC on Sunday)
-# Command: python jobs/ingest_sheet.py
-```
+## ⚠️ Important Notes
 
-### Score Updates (Sunday Hourly 10 AM - 9 PM PT)
-```bash
-# Name: scores-sunday-hourly
-# Schedule: 0 17-4 * * 0 (10 AM - 9 PM PT = 5 PM - 4 AM UTC on Sunday)
-# Command: python jobs/update_scores.py
-```
+1. **UTC Timezone:** All cron jobs run in UTC. NFL games are typically:
+   - Sunday 1 PM ET = 18:00 UTC
+   - Sunday 8:30 PM ET = 01:30 UTC Monday
 
-### Score Updates (Monday/Thursday 9 PM PT)
-```bash
-# Name: scores-weeknight
-# Schedule: 0 4 * * 1,4 (9 PM PT = 4 AM UTC next day)
-# Command: python jobs/update_scores.py
-```
+2. **Exit Behavior:** Cron scripts must exit when complete (✅ our scripts do this)
 
-## Method 2: GitHub Actions (Free Alternative)
+3. **Resource Sharing:** All services share the same PostgreSQL database
 
-If Railway cron costs too much, we can use GitHub Actions:
+4. **Monitoring:** Check Railway logs to ensure cron jobs are executing successfully
 
-1. Create `.github/workflows/cron-jobs.yml`
-2. Use repository secrets for environment variables
-3. Jobs run and call Railway API endpoints
+## 🎯 Expected Behavior
 
-Let me know which approach you prefer!
+Once set up, you should see:
+- **Hourly:** Fresh picks data ingested from Google Sheets
+- **Every 30 min:** Live NFL scores and game statuses updated
+- **Daily:** Historical data backfilled and validated
+- **Real-time dashboard:** Always showing current survivor pool status!
+
+Your survivor pool will now update automatically! 🏈🎉

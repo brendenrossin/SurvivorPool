@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Railway Cron Job: Update NFL scores and game results
-Runs every 15 minutes during game days to keep scores fresh
+Runs every 15 minutes ONLY on Sundays to keep scores fresh
+Includes rate limiting protection for ESPN API
 """
 
 import os

@@ -3,6 +3,7 @@ from typing import List, Dict, Optional
 from datetime import datetime, timezone
 import requests
 from dataclasses import dataclass
+from api.rate_limiter import get_rate_limiter
 
 @dataclass
 class Game:
@@ -35,30 +36,39 @@ class ESPNScoreProvider(ScoreProvider):
         self.base_url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl"
 
     def get_schedule_and_scores(self, season: int, week: int) -> List[Game]:
-        """Fetch games from ESPN API"""
-        try:
-            url = f"{self.base_url}/scoreboard"
-            params = {
-                "dates": season,
-                "seasontype": 2,  # Regular season
-                "week": week
-            }
+        """Fetch games from ESPN API with rate limiting and caching"""
+        rate_limiter = get_rate_limiter()
+        cache_key = f"espn_scores_{season}_week_{week}"
 
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+        def fetch_espn_data():
+            """Internal function to fetch fresh data from ESPN"""
+            try:
+                url = f"{self.base_url}/scoreboard"
+                params = {
+                    "dates": season,
+                    "seasontype": 2,  # Regular season
+                    "week": week
+                }
 
-            games = []
-            for event in data.get("events", []):
-                game = self._parse_espn_game(event, season, week)
-                if game:
-                    games.append(game)
+                response = requests.get(url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
 
-            return games
+                games = []
+                for event in data.get("events", []):
+                    game = self._parse_espn_game(event, season, week)
+                    if game:
+                        games.append(game)
 
-        except Exception as e:
-            print(f"Error fetching ESPN data: {e}")
-            return []
+                print(f"✅ ESPN API: Fetched {len(games)} games for Week {week}")
+                return games
+
+            except Exception as e:
+                print(f"❌ ESPN API Error: {e}")
+                return []
+
+        # Use rate limiter with caching
+        return rate_limiter.get_cached_or_fetch(cache_key, fetch_espn_data)
 
     def _parse_espn_game(self, event: Dict, season: int, week: int) -> Optional[Game]:
         """Parse ESPN game event into Game object"""

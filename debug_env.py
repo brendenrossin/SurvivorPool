@@ -6,8 +6,8 @@ Simple environment debug script for Railway
 import os
 import sys
 
-print("🔍 RAILWAY ENVIRONMENT DEBUG")
-print("=" * 40)
+print("🔍 RAILWAY ENVIRONMENT DEBUG - NO CACHE BUILD")
+print("=" * 50)
 
 # Check PORT
 port = os.environ.get('PORT')

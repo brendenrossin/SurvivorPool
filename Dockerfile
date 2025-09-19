@@ -32,5 +32,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/_stcore/health || exit 1
 
-# Run the environment debug script first
-CMD ["python", "debug_env.py"]
+# Run the real Streamlit app
+CMD ["./start.sh"]

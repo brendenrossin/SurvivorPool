@@ -12,7 +12,7 @@ fi
 
 echo "🎯 Starting Streamlit on port $PORT"
 
-exec streamlit run minimal_test.py \
+exec streamlit run app/main.py \
     --server.port=$PORT \
     --server.address=0.0.0.0 \
     --server.headless=true \
