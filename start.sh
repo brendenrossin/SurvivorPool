@@ -17,20 +17,25 @@ echo "📊 Checking if database needs initial data..."
 python -c "
 from api.database import SessionLocal
 from api.models import Player
-db = SessionLocal()
-player_count = db.query(Player).count()
-db.close()
-if player_count == 0:
-    print('🆕 Database is empty, running initial data population...')
-    exit(1)
-else:
-    print(f'✅ Database has {player_count} players, skipping population')
+try:
+    db = SessionLocal()
+    player_count = db.query(Player).count()
+    db.close()
+    if player_count == 0:
+        print('🆕 Database is empty, will populate in background...')
+        exit(1)
+    else:
+        print(f'✅ Database has {player_count} players, skipping population')
+        exit(0)
+except Exception as e:
+    print(f'⚠️ Database check failed: {e}, starting app anyway...')
     exit(0)
 "
 
 if [ $? -eq 1 ]; then
-    echo "🔄 Populating database with initial data..."
-    python populate_data.py || echo "⚠️ Data population had issues, continuing anyway..."
+    echo "🔄 Starting background data population..."
+    nohup python populate_data.py > logs/populate.log 2>&1 &
+    echo "📱 Data population running in background, starting Streamlit..."
 fi
 
 exec streamlit run app/main.py \
