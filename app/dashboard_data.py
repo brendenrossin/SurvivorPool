@@ -6,7 +6,7 @@ import os
 import json
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, text
+from sqlalchemy import and_, func, text, select
 from datetime import datetime
 
 from api.database import SessionLocal
@@ -37,7 +37,7 @@ def get_summary_data(season: int) -> Dict:
         ).distinct().subquery()
 
         remaining_players = db.query(Player).filter(
-            ~Player.player_id.in_(eliminated_players)
+            ~Player.player_id.in_(select(eliminated_players.c.player_id))
         ).count()
 
         # Get picks by week and team
