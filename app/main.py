@@ -14,24 +14,9 @@ import logging
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import startup logger
-from app.startup_logger import comprehensive_startup_check
-
-# Run comprehensive startup check
+# Simple startup
 print("🚀 Starting Survivor Pool Dashboard...")
-startup_success = comprehensive_startup_check()
-
-if not startup_success:
-    print("💥 Startup checks failed! See logs for details.")
-    st.error("❌ Application startup failed. Check server logs for details.")
-    st.stop()
-
-# Start background data ingestion for Railway
-try:
-    from background_ingestion import start_background_ingestion
-    start_background_ingestion()
-except Exception as e:
-    print(f"⚠️ Background ingestion startup warning: {e}")
+print("✅ Streamlit app starting...")
 
 from app.dashboard_data import (
     load_team_data,
