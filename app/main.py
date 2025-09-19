@@ -121,8 +121,8 @@ def main():
     st.divider()
     st.header("Pool Insights")
 
-    # Create tabs for v1.5 features
-    tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Chaos Meter"])
+    # Create tabs for Pool Insights features
+    tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Elimination Tracker"])
 
     with tab1:
         try:
@@ -146,7 +146,7 @@ def main():
             render_chaos_meter_widget(db, SEASON)
             db.close()
         except Exception as e:
-            st.info("🌪️ Chaos Meter will activate once games are completed!")
+            st.info("📊 Elimination Tracker will activate once eliminations begin!")
 
     # Footer with update times
     render_footer(summary.get("last_updates", {}))
@@ -238,13 +238,18 @@ def render_weekly_picks_chart(summary):
     # Calculate proper annotation positions for stacked bars
     week_annotations = []
     for week in df_sorted["Week"].unique():
+        # Get data for this week and sort by count descending (largest first = bottom of stack)
         week_data = df_sorted[df_sorted["Week"] == week].sort_values('Count', ascending=False)
         cumulative_y = 0
 
         for _, row in week_data.iterrows():
             if row["Count"] >= 10:  # Only annotate if 10+ picks
                 # Position text at center of this team's bar segment
-                y_center = cumulative_y + (row["Count"] / 2)
+                # Add small offset to account for bar borders/spacing
+                segment_start = cumulative_y
+                segment_end = cumulative_y + row["Count"]
+                y_center = segment_start + (row["Count"] / 2)
+
                 week_annotations.append({
                     "x": row["Week"],
                     "y": y_center,
@@ -279,10 +284,10 @@ def render_weekly_picks_chart(summary):
 
 def render_player_search():
     """Render player search section"""
-    st.subheader("Find a Player")
+    st.subheader("Find a Survivor")
 
     # Search input
-    search_query = st.text_input("Enter player name:", placeholder="e.g., Bishop Sankey")
+    search_query = st.text_input("Enter survivor name:", placeholder="e.g., Travis Taylor")
 
     if search_query:
         # Search for matching players
