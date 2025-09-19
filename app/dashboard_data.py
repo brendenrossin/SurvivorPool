@@ -80,7 +80,11 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
         if not player:
             return None
 
-        picks_query = db.query(Pick, PickResult, Game).outerjoin(PickResult).outerjoin(Game).filter(
+        picks_query = db.query(Pick, PickResult, Game).outerjoin(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).outerjoin(
+            Game, PickResult.game_id == Game.game_id
+        ).filter(
             and_(
                 Pick.player_id == player.player_id,
                 Pick.season == season
@@ -112,10 +116,9 @@ def get_meme_stats(season: int) -> Dict:
     """Get meme statistics for dashboard"""
     db = SessionLocal()
     try:
-        # Dumbest picks (biggest losing margins)
+        # Dumbest picks (biggest losing margins) - grouped by team
         dumbest_query = text("""
             SELECT
-                p.display_name,
                 pi.week,
                 pi.team_abbr,
                 g.home_team,
@@ -125,14 +128,20 @@ def get_meme_stats(season: int) -> Dict:
                 CASE
                     WHEN pi.team_abbr = g.home_team THEN g.away_score - g.home_score
                     ELSE g.home_score - g.away_score
-                END as margin
+                END as margin,
+                COUNT(DISTINCT pi.player_id) as eliminated_count
             FROM picks pi
-            JOIN players p ON pi.player_id = p.player_id
             JOIN pick_results pr ON pi.pick_id = pr.pick_id
-            JOIN games g ON pr.game_id = g.game_id
+            JOIN games g ON (
+                (g.home_team = pi.team_abbr OR g.away_team = pi.team_abbr)
+                AND g.week = pi.week
+                AND g.season = pi.season
+            )
             WHERE pi.season = :season
                 AND pr.survived = FALSE
-                AND g.status = 'final'
+                AND g.home_score IS NOT NULL
+                AND g.away_score IS NOT NULL
+            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score
             ORDER BY margin DESC
             LIMIT 5
         """)
@@ -143,32 +152,37 @@ def get_meme_stats(season: int) -> Dict:
         for row in dumbest_results:
             opponent = row.away_team if row.team_abbr == row.home_team else row.home_team
             dumbest_picks.append({
-                "player": row.display_name,
                 "week": row.week,
                 "team": row.team_abbr,
                 "opponent": opponent,
-                "margin": row.margin
+                "margin": row.margin,
+                "eliminated_count": row.eliminated_count
             })
 
-        # Big balls picks (underdog wins - road team beating home team for now)
+        # Big balls picks (underdog wins - road team beating home team for now) - grouped by team
         big_balls_query = text("""
             SELECT
-                p.display_name,
                 pi.week,
                 pi.team_abbr,
                 g.home_team,
                 g.away_team,
                 g.home_score,
-                g.away_score
+                g.away_score,
+                COUNT(DISTINCT pi.player_id) as big_balls_count
             FROM picks pi
-            JOIN players p ON pi.player_id = p.player_id
             JOIN pick_results pr ON pi.pick_id = pr.pick_id
-            JOIN games g ON pr.game_id = g.game_id
+            JOIN games g ON (
+                (g.home_team = pi.team_abbr OR g.away_team = pi.team_abbr)
+                AND g.week = pi.week
+                AND g.season = pi.season
+            )
             WHERE pi.season = :season
                 AND pr.survived = TRUE
-                AND g.status = 'final'
+                AND g.home_score IS NOT NULL
+                AND g.away_score IS NOT NULL
                 AND pi.team_abbr = g.away_team  -- picked away team
                 AND g.away_score > g.home_score  -- away team won
+            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score
             ORDER BY pi.week DESC
             LIMIT 5
         """)
@@ -178,11 +192,11 @@ def get_meme_stats(season: int) -> Dict:
         big_balls_picks = []
         for row in big_balls_results:
             big_balls_picks.append({
-                "player": row.display_name,
                 "week": row.week,
                 "team": row.team_abbr,
                 "opponent": row.home_team,
-                "road_win": True
+                "road_win": True,
+                "big_balls_count": row.big_balls_count
             })
 
         return {

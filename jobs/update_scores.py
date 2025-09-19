@@ -139,17 +139,39 @@ class ScoreUpdater:
 
             # Check if game has started (locking logic)
             now = datetime.now(timezone.utc)
-            if now >= game.kickoff and not pick_result.is_locked:
+            # Convert game.kickoff to UTC if it's naive (assume UTC)
+            game_kickoff = game.kickoff.replace(tzinfo=timezone.utc) if game.kickoff.tzinfo is None else game.kickoff
+            if now >= game_kickoff and not pick_result.is_locked:
                 pick_result.is_locked = True
                 updated_count += 1
 
-            # Update survival status if game is final
-            if game.status == "final" and game.winner_abbr is not None:
-                old_survived = pick_result.survived
-                pick_result.survived = (pick.team_abbr == game.winner_abbr)
+            # Update survival status if game is complete
+            # Check if game is finished - either marked as final OR has scores and kickoff was >4 hours ago
+            is_game_complete = False
+            if game.status == "final":
+                is_game_complete = True
+            elif (game.home_score is not None and game.away_score is not None and
+                  game.kickoff is not None):
+                # Game has scores - check if kickoff was more than 4 hours ago
+                hours_since_kickoff = (now - game_kickoff).total_seconds() / 3600
+                is_game_complete = hours_since_kickoff > 4
 
-                if old_survived != pick_result.survived:
-                    updated_count += 1
+            if is_game_complete:
+                # Determine winner if not already set
+                if game.winner_abbr is None and game.home_score is not None and game.away_score is not None:
+                    if game.home_score > game.away_score:
+                        game.winner_abbr = game.home_team
+                    elif game.away_score > game.home_score:
+                        game.winner_abbr = game.away_team
+                    # Ties leave winner_abbr as None
+
+                # Update pick survival status
+                if game.winner_abbr is not None:
+                    old_survived = pick_result.survived
+                    pick_result.survived = (pick.team_abbr == game.winner_abbr)
+
+                    if old_survived != pick_result.survived:
+                        updated_count += 1
 
         return updated_count
 

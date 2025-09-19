@@ -21,11 +21,12 @@ def calculate_chaos_score(db, current_season: int, week: int) -> Dict[str, Any]:
     from api.models import Pick, PickResult, Game, Player
 
     try:
-        # Get all games for the week
+        # Get all games for the week with scores (completed games)
         games_query = db.query(Game).filter(
             Game.season == current_season,
             Game.week == week,
-            Game.status == "final"  # Only completed games
+            Game.home_score.isnot(None),
+            Game.away_score.isnot(None)  # Only completed games with scores
         )
         games = games_query.all()
 
@@ -146,7 +147,8 @@ def render_chaos_meter_widget(db, current_season: int):
 
     weeks_query = db.query(Game.week).filter(
         Game.season == current_season,
-        Game.status == "final"
+        Game.home_score.isnot(None),
+        Game.away_score.isnot(None)  # Only completed games with scores
     ).distinct().order_by(Game.week)
 
     completed_weeks = [week.week for week in weeks_query.all()]
