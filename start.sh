@@ -33,9 +33,11 @@ except Exception as e:
 "
 
 if [ $? -eq 1 ]; then
-    echo "🔄 Starting background data population (NFL-only for now)..."
-    nohup python populate_data_nfl_only.py > logs/populate.log 2>&1 &
-    echo "📱 Data population running in background, starting Streamlit..."
+    echo "🔄 Populating database with mock data..."
+    python populate_mock_simple.py || echo "⚠️ Mock data creation had issues"
+    echo "🏈 Fetching NFL games..."
+    python jobs/update_scores.py || echo "⚠️ NFL scores update had issues"
+    echo "📱 Data population complete, starting Streamlit..."
 fi
 
 exec streamlit run app/main.py \

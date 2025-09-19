@@ -132,80 +132,64 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
         if today.hour >= 4:  # 4 AM UTC = 11 PM PST previous day
             current_week += 1
 
-    st.subheader(f"🏈 Live Scores - Week {current_week}")
+    # Create compact live scores widget
+    with st.expander(f"🏈 Week {current_week} Live Scores", expanded=False):
 
-    # Get live scores data
-    live_scores = get_live_scores_data(db, current_season, current_week)
+        # Get live scores data
+        live_scores = get_live_scores_data(db, current_season, current_week)
 
-    if not live_scores:
-        st.info("🏈 **No games to show this week**\n\nPossible reasons:\n- Game data hasn't been loaded yet (check cron jobs)\n- It's early in the week and games haven't been scheduled")
-        return
+        if not live_scores:
+            st.info("🏈 **No games this week** - Game data will appear once loaded")
+            return
 
-    # Check if we're showing all games or just picked games
-    has_any_pickers = any(game['has_pickers'] for game in live_scores)
-    if has_any_pickers:
-        st.caption("Showing games for teams picked by players this week")
-    else:
-        st.caption("📺 No picks yet - showing all games this week to keep it interesting!")
+        # Check if we're showing all games or just picked games
+        has_any_pickers = any(game['has_pickers'] for game in live_scores)
+        if has_any_pickers:
+            st.caption("Showing games for teams picked by players this week")
+        else:
+            st.caption("📺 No picks yet - showing all games this week")
 
-    # Sort by game status priority (live games first, then by kickoff time)
-    def sort_key(game):
-        status_priority = {'in': 0, 'pre': 1, 'final': 2}
-        return (status_priority.get(game['status'], 3), game['kickoff'])
+        # Sort by game status priority (live games first, then by kickoff time)
+        def sort_key(game):
+            status_priority = {'in': 0, 'pre': 1, 'final': 2}
+            return (status_priority.get(game['status'], 3), game['kickoff'])
 
-    live_scores.sort(key=sort_key)
+        live_scores.sort(key=sort_key)
 
-    # Create columns for better layout
-    cols = st.columns([1, 3, 1, 1, 3])
+        # Show games in a compact table format
+        for i in range(0, len(live_scores), 2):
+            cols = st.columns(2)
 
-    # Header row
-    with cols[0]:
-        st.caption("**Away**")
-    with cols[1]:
-        st.caption("**Away Pickers**")
-    with cols[2]:
-        st.caption("**Score**")
-    with cols[3]:
-        st.caption("**Home**")
-    with cols[4]:
-        st.caption("**Home Pickers**")
+            for j, col in enumerate(cols):
+                if i + j < len(live_scores):
+                    game = live_scores[i + j]
 
-    # Game rows
-    for game in live_scores:
-        cols = st.columns([1, 3, 1, 1, 3])
+                    with col:
+                        # Compact game display
+                        if game['status'] == 'in':
+                            status_emoji = "🔴"
+                        elif game['status'] == 'final':
+                            status_emoji = "✅"
+                        else:
+                            status_emoji = "🕐"
 
-        # Away team logo and name
-        with cols[0]:
-            logo_path = f"app/static/logos/{game['away_team']}.png"
-            if os.path.exists(logo_path):
-                st.image(logo_path, width=40)
-            st.write(f"**{game['away_team']}**")
+                        # Show away @ home with score
+                        game_display = f"{status_emoji} **{game['away_team']}** @ **{game['home_team']}**"
 
-        # Away team pickers
-        with cols[1]:
-            if game['away_pickers']:
-                st.write(", ".join(game['away_pickers']))
-            else:
-                st.write("—")
+                        if game['status'] != 'pre':
+                            game_display += f" ({game['score_display']})"
 
-        # Score/Status
-        with cols[2]:
-            st.write(f"**{game['score_display']}**")
-            st.caption(game['status_display'])
+                        st.write(game_display)
 
-        # Home team logo and name
-        with cols[3]:
-            logo_path = f"app/static/logos/{game['home_team']}.png"
-            if os.path.exists(logo_path):
-                st.image(logo_path, width=40)
-            st.write(f"**{game['home_team']}**")
+                        # Show pickers if any
+                        all_pickers = game['away_pickers'] + game['home_pickers']
+                        if all_pickers:
+                            st.caption(f"Picked by: {', '.join(all_pickers)}")
+                        elif game['status'] == 'pre':
+                            kickoff_time = game['kickoff'].strftime('%a %I:%M %p') if game['kickoff'] else 'TBD'
+                            st.caption(f"Kickoff: {kickoff_time}")
 
-        # Home team pickers
-        with cols[4]:
-            if game['home_pickers']:
-                st.write(", ".join(game['home_pickers']))
-            else:
-                st.write("—")
+                        st.write("")  # Add some spacing
 
         # Add separator
         st.divider()
