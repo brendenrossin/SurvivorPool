@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from typing import Dict, Any
 import math
+from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 
 def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict[str, Any]:
     """
@@ -147,8 +148,8 @@ def render_chaos_meter_widget(db, current_season: int):
                 number={'suffix': "%"}
             ))
 
-            fig.update_layout(height=300)
-            st.plotly_chart(fig, use_container_width=True)
+            # Use mobile optimization for gauge
+            render_mobile_chart(fig, 'gauge')
 
             st.markdown(f"### {level_desc}")
 
@@ -195,15 +196,11 @@ def render_chaos_meter_widget(db, current_season: int):
                 hovertemplate="Week %{x}<br>Eliminated: %{y:.1f}%<extra></extra>"
             ))
 
-            fig.update_layout(
-                title="Cumulative Elimination Percentage by Week",
-                xaxis_title="Week",
-                yaxis_title="Percentage Eliminated",
-                height=400,
-                yaxis=dict(range=[0, max(df["cumulative_percentage"]) + 5])
-            )
+            # Set y-axis range before mobile optimization
+            fig.update_yaxes(range=[0, max(df["cumulative_percentage"]) + 5])
 
-            st.plotly_chart(fig, use_container_width=True)
+            # Use mobile optimization for line chart
+            render_mobile_chart(fig, 'line_chart')
 
             # Worst elimination weeks
             st.subheader("💀 Worst Elimination Weeks")

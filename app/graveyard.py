@@ -8,6 +8,7 @@ import pandas as pd
 import plotly.express as px
 from typing import List, Dict, Any
 import os
+from app.mobile_plotly_config import render_mobile_chart
 
 def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
     """
@@ -199,7 +200,8 @@ def render_graveyard_timeline(db, current_season: int):
         yaxis_title="Players Eliminated"
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Use mobile optimization for heatmap
+    render_mobile_chart(fig, 'heatmap')
 
     # Show worst elimination weeks
     if len(week_eliminations) > 0:
