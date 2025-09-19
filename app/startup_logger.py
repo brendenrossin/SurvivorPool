@@ -87,10 +87,11 @@ def log_database_check(logger):
 
     try:
         from api.database import SessionLocal, engine
+        from sqlalchemy import text
 
         # Test basic connection
         db = SessionLocal()
-        result = db.execute("SELECT 1 as test").fetchone()
+        result = db.execute(text("SELECT 1 as test")).fetchone()
         db.close()
 
         logger.info(f"   ✅ Database connection: OK (result: {result})")
