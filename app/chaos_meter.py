@@ -9,191 +9,142 @@ import plotly.graph_objects as go
 from typing import Dict, Any
 import math
 
-def calculate_chaos_score(db, current_season: int, week: int) -> Dict[str, Any]:
+def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict[str, Any]:
     """
-    Calculate chaos score for a given week based on:
-    - Number of eliminations
-    - Upset victories (favorites losing)
-    - Close games (decided by < 7 points)
-    - Road wins
-    - Overtime games
+    Calculate elimination percentage for a given week:
+    Percentage = eliminations in this week / players that made it to this week
     """
-    from api.models import Pick, PickResult, Game, Player
+    from api.models import Pick, PickResult, Player
 
     try:
-        # Get all games for the week with scores (completed games)
-        games_query = db.query(Game).filter(
-            Game.season == current_season,
-            Game.week == week,
-            Game.home_score.isnot(None),
-            Game.away_score.isnot(None)  # Only completed games with scores
-        )
-        games = games_query.all()
+        # Get total players who originally started
+        total_original_players = db.query(Player).count()
 
-        if not games:
-            return {"chaos_score": 0, "factors": {}, "total_games": 0}
+        # Get players eliminated in previous weeks (before this week)
+        eliminated_before_week = db.query(Pick.player_id).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == current_season,
+            Pick.week < week,
+            PickResult.survived == False
+        ).distinct().count()
 
-        # Get eliminations for the week
-        eliminations_query = db.query(Pick).join(
+        # Get players eliminated in this specific week
+        eliminated_this_week = db.query(Pick.player_id).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
             Pick.season == current_season,
             Pick.week == week,
             PickResult.survived == False
-        )
-        eliminations = eliminations_query.count()
+        ).distinct().count()
 
-        # Calculate chaos factors
-        factors = {
-            "eliminations": 0,
-            "close_games": 0,
-            "blowouts": 0,
-            "road_wins": 0,
-            "upsets": 0,  # We'll estimate based on score margins
-            "total_points": 0
-        }
+        # Players that made it to this week (started minus eliminated before)
+        players_entering_week = total_original_players - eliminated_before_week
 
-        total_score_diff = 0
-        close_game_count = 0
-        blowout_count = 0
-        road_win_count = 0
+        # Calculate elimination percentage for this week
+        week_elimination_percentage = (eliminated_this_week / players_entering_week * 100) if players_entering_week > 0 else 0
 
-        for game in games:
-            if game.home_score is None or game.away_score is None:
-                continue
-
-            score_diff = abs(game.home_score - game.away_score)
-            total_score_diff += score_diff
-
-            # Close games (decided by 7 or fewer points)
-            if score_diff <= 7:
-                close_game_count += 1
-
-            # Blowouts (decided by 21+ points)
-            if score_diff >= 21:
-                blowout_count += 1
-
-            # Road wins (away team wins)
-            if game.winner_abbr == game.away_team:
-                road_win_count += 1
-
-        factors["eliminations"] = eliminations
-        factors["close_games"] = close_game_count
-        factors["blowouts"] = blowout_count
-        factors["road_wins"] = road_win_count
-        factors["total_points"] = sum(g.home_score + g.away_score for g in games if g.home_score and g.away_score)
-
-        # Calculate chaos score (0-100)
-        chaos_score = 0
-
-        # Eliminations factor (0-40 points) - more eliminations = more chaos
-        elimination_factor = min(40, eliminations * 5)
-        chaos_score += elimination_factor
-
-        # Close games factor (0-25 points) - more close games = more chaos
-        close_game_factor = min(25, (close_game_count / len(games)) * 25) if games else 0
-        chaos_score += close_game_factor
-
-        # Road wins factor (0-20 points) - more road wins = more chaos
-        road_win_factor = min(20, (road_win_count / len(games)) * 20) if games else 0
-        chaos_score += road_win_factor
-
-        # Average margin factor (0-15 points) - closer average margins = more chaos
-        avg_margin = total_score_diff / len(games) if games else 0
-        margin_factor = max(0, 15 - (avg_margin / 2))  # Inverse relationship
-        chaos_score += margin_factor
+        # Calculate cumulative elimination percentage (total eliminated / original total)
+        total_eliminated = eliminated_before_week + eliminated_this_week
+        cumulative_elimination_percentage = (total_eliminated / total_original_players * 100) if total_original_players > 0 else 0
 
         return {
-            "chaos_score": round(chaos_score, 1),
-            "factors": factors,
-            "total_games": len(games),
-            "avg_margin": round(avg_margin, 1) if games else 0,
-            "breakdown": {
-                "eliminations": round(elimination_factor, 1),
-                "close_games": round(close_game_factor, 1),
-                "road_wins": round(road_win_factor, 1),
-                "margins": round(margin_factor, 1)
-            }
+            "week_elimination_percentage": round(week_elimination_percentage, 1),
+            "cumulative_elimination_percentage": round(cumulative_elimination_percentage, 1),
+            "eliminated_this_week": eliminated_this_week,
+            "players_entering_week": players_entering_week,
+            "total_eliminated": total_eliminated,
+            "total_original_players": total_original_players,
+            "survivors_remaining": total_original_players - total_eliminated
         }
 
     except Exception as e:
-        st.error(f"Error calculating chaos score: {e}")
-        return {"chaos_score": 0, "factors": {}, "total_games": 0}
+        st.error(f"Error calculating elimination percentage: {e}")
+        return {
+            "week_elimination_percentage": 0,
+            "cumulative_elimination_percentage": 0,
+            "eliminated_this_week": 0,
+            "players_entering_week": 0,
+            "total_eliminated": 0,
+            "total_original_players": 0,
+            "survivors_remaining": 0
+        }
 
-def get_chaos_level_description(chaos_score: float) -> tuple:
-    """Get chaos level description and emoji"""
-    if chaos_score >= 80:
-        return "🌪️ ABSOLUTE MAYHEM", "#FF4444"
-    elif chaos_score >= 65:
-        return "🔥 PURE CHAOS", "#FF6B35"
-    elif chaos_score >= 50:
-        return "⚡ HIGH DRAMA", "#FFB347"
-    elif chaos_score >= 35:
-        return "🎲 MODERATE CHAOS", "#87CEEB"
-    elif chaos_score >= 20:
-        return "😴 MILD EXCITEMENT", "#98FB98"
+def get_elimination_level_description(elimination_percentage: float) -> tuple:
+    """Get elimination level description and emoji based on weekly elimination percentage"""
+    if elimination_percentage >= 25:
+        return "🩸 BLOODBATH", "#FF4444"
+    elif elimination_percentage >= 15:
+        return "💀 MASSACRE", "#FF6B35"
+    elif elimination_percentage >= 10:
+        return "⚡ BRUTAL WEEK", "#FFB347"
+    elif elimination_percentage >= 5:
+        return "🎯 STEADY CUTS", "#87CEEB"
+    elif elimination_percentage >= 1:
+        return "😌 LIGHT CASUALTIES", "#98FB98"
     else:
-        return "💤 BORING WEEK", "#D3D3D3"
+        return "😴 SAFE WEEK", "#D3D3D3"
 
 def render_chaos_meter_widget(db, current_season: int):
     """
-    Render the Chaos Meter widget
+    Render the Elimination Tracker widget (formerly Chaos Meter)
     """
-    st.subheader("🌪️ Chaos Meter")
-    st.caption("Measuring the pure, unadulterated chaos of each week")
+    st.subheader("📊 Elimination Tracker")
+    st.caption("Tracking survivor elimination rates week by week")
 
-    # Get all weeks with completed games
-    from api.models import Game
+    # Get all weeks with eliminations or completed games
+    from api.models import Game, Pick, PickResult
 
-    weeks_query = db.query(Game.week).filter(
-        Game.season == current_season,
-        Game.home_score.isnot(None),
-        Game.away_score.isnot(None)  # Only completed games with scores
-    ).distinct().order_by(Game.week)
+    weeks_query = db.query(Pick.week).join(
+        PickResult, Pick.pick_id == PickResult.pick_id
+    ).filter(
+        Pick.season == current_season
+    ).distinct().order_by(Pick.week)
 
-    completed_weeks = [week.week for week in weeks_query.all()]
+    available_weeks = [week.week for week in weeks_query.all()]
 
-    if not completed_weeks:
-        st.info("🌪️ **No chaos to measure yet**\n\nThe Chaos Meter will spring to life once games are completed. Prepare for mayhem!")
+    if not available_weeks:
+        st.info("📊 **No elimination data yet**\n\nThe Elimination Tracker will activate once picks are processed and eliminations begin!")
         return
 
     # Create tabs for current week and historical
-    tab1, tab2 = st.tabs(["📊 This Week", "📈 Historical Chaos"])
+    tab1, tab2 = st.tabs(["📊 Latest Week", "📈 Season Tracker"])
 
     with tab1:
-        # Current/latest week chaos
-        current_week = max(completed_weeks)
-        chaos_data = calculate_chaos_score(db, current_season, current_week)
+        # Latest week elimination data
+        current_week = max(available_weeks)
+        elimination_data = calculate_elimination_percentage(db, current_season, current_week)
 
         col1, col2 = st.columns([2, 1])
 
         with col1:
-            # Chaos meter gauge
-            chaos_score = chaos_data["chaos_score"]
-            level_desc, color = get_chaos_level_description(chaos_score)
+            # Elimination percentage gauge
+            week_percentage = elimination_data["week_elimination_percentage"]
+            level_desc, color = get_elimination_level_description(week_percentage)
 
             fig = go.Figure(go.Indicator(
-                mode="gauge+number+delta",
-                value=chaos_score,
+                mode="gauge+number",
+                value=week_percentage,
                 domain={'x': [0, 1], 'y': [0, 1]},
-                title={'text': f"Week {current_week} Chaos Level"},
+                title={'text': f"Week {current_week} Elimination Rate"},
                 gauge={
-                    'axis': {'range': [None, 100]},
+                    'axis': {'range': [None, 30]},  # Max 30% for scale
                     'bar': {'color': color},
                     'steps': [
-                        {'range': [0, 20], 'color': "#D3D3D3"},
-                        {'range': [20, 35], 'color': "#98FB98"},
-                        {'range': [35, 50], 'color': "#87CEEB"},
-                        {'range': [50, 65], 'color': "#FFB347"},
-                        {'range': [65, 80], 'color': "#FF6B35"},
-                        {'range': [80, 100], 'color': "#FF4444"}
+                        {'range': [0, 1], 'color': "#D3D3D3"},
+                        {'range': [1, 5], 'color': "#98FB98"},
+                        {'range': [5, 10], 'color': "#87CEEB"},
+                        {'range': [10, 15], 'color': "#FFB347"},
+                        {'range': [15, 25], 'color': "#FF6B35"},
+                        {'range': [25, 30], 'color': "#FF4444"}
                     ],
                     'threshold': {
                         'line': {'color': "red", 'width': 4},
                         'thickness': 0.75,
-                        'value': 90
+                        'value': 25
                     }
-                }
+                },
+                number={'suffix': "%"}
             ))
 
             fig.update_layout(height=300)
@@ -202,76 +153,69 @@ def render_chaos_meter_widget(db, current_season: int):
             st.markdown(f"### {level_desc}")
 
         with col2:
-            # Chaos breakdown
-            st.markdown("### 🔍 Chaos Factors")
+            # Elimination breakdown
+            st.markdown("### 📈 Week Stats")
 
-            factors = chaos_data["factors"]
-            breakdown = chaos_data.get("breakdown", {})
+            st.metric("💀 Eliminated This Week", elimination_data["eliminated_this_week"])
 
-            st.metric("💀 Eliminations", factors.get("eliminations", 0))
-            st.caption(f"Chaos Points: {breakdown.get('eliminations', 0)}")
+            st.metric("👥 Entered This Week", elimination_data["players_entering_week"])
 
-            st.metric("⚡ Close Games", factors.get("close_games", 0))
-            st.caption(f"Chaos Points: {breakdown.get('close_games', 0)}")
+            st.metric("🏆 Still Alive", elimination_data["survivors_remaining"])
 
-            st.metric("🛣️ Road Wins", factors.get("road_wins", 0))
-            st.caption(f"Chaos Points: {breakdown.get('road_wins', 0)}")
-
-            st.metric("📊 Avg Margin", f"{chaos_data.get('avg_margin', 0)} pts")
-            st.caption(f"Chaos Points: {breakdown.get('margins', 0)}")
+            st.metric("📊 Cumulative Eliminated", f"{elimination_data['cumulative_elimination_percentage']:.1f}%")
 
     with tab2:
-        # Historical chaos chart
-        st.subheader("📈 Season Chaos Tracker")
+        # Historical elimination chart
+        st.subheader("📈 Season Elimination Tracker")
 
-        # Calculate chaos for all completed weeks
-        chaos_history = []
-        for week in completed_weeks:
-            week_chaos = calculate_chaos_score(db, current_season, week)
-            chaos_history.append({
+        # Calculate elimination percentages for all weeks
+        elimination_history = []
+        for week in available_weeks:
+            week_data = calculate_elimination_percentage(db, current_season, week)
+            elimination_history.append({
                 "week": week,
-                "chaos_score": week_chaos["chaos_score"],
-                "eliminations": week_chaos["factors"].get("eliminations", 0)
+                "cumulative_percentage": week_data["cumulative_elimination_percentage"],
+                "week_percentage": week_data["week_elimination_percentage"],
+                "survivors_remaining": week_data["survivors_remaining"]
             })
 
-        if chaos_history:
-            df = pd.DataFrame(chaos_history)
+        if elimination_history:
+            df = pd.DataFrame(elimination_history)
 
-            # Line chart of chaos over time
+            # Line chart of cumulative eliminations over time
             fig = go.Figure()
 
             fig.add_trace(go.Scatter(
                 x=df["week"],
-                y=df["chaos_score"],
-                mode='lines+markers+text',
-                text=[get_chaos_level_description(score)[0].split()[1] for score in df["chaos_score"]],
-                textposition="top center",
+                y=df["cumulative_percentage"],
+                mode='lines+markers',
                 line=dict(color='#FF6B35', width=3),
                 marker=dict(size=10),
-                name="Chaos Score"
+                name="Cumulative Eliminations %",
+                hovertemplate="Week %{x}<br>Eliminated: %{y:.1f}%<extra></extra>"
             ))
 
             fig.update_layout(
-                title="Chaos Score by Week",
+                title="Cumulative Elimination Percentage by Week",
                 xaxis_title="Week",
-                yaxis_title="Chaos Score",
+                yaxis_title="Percentage Eliminated",
                 height=400,
-                yaxis=dict(range=[0, 100])
+                yaxis=dict(range=[0, max(df["cumulative_percentage"]) + 5])
             )
 
             st.plotly_chart(fig, use_container_width=True)
 
-            # Chaos leaderboard
-            st.subheader("🏆 Most Chaotic Weeks")
+            # Worst elimination weeks
+            st.subheader("💀 Worst Elimination Weeks")
 
-            top_chaos = df.nlargest(5, "chaos_score")
-            for i, (_, week_data) in enumerate(top_chaos.iterrows(), 1):
+            worst_weeks = df.nlargest(5, "week_percentage")
+            for i, (_, week_data) in enumerate(worst_weeks.iterrows(), 1):
                 week = week_data["week"]
-                score = week_data["chaos_score"]
-                desc, color = get_chaos_level_description(score)
+                percentage = week_data["week_percentage"]
+                desc, color = get_elimination_level_description(percentage)
 
                 st.markdown(f"""
-                **{i}. Week {week}** - {score}/100
+                **{i}. Week {week}** - {percentage:.1f}% eliminated
 
                 {desc}
                 """)
