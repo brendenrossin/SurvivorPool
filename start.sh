@@ -33,8 +33,8 @@ except Exception as e:
 "
 
 if [ $? -eq 1 ]; then
-    echo "🔄 Starting background data population..."
-    nohup python populate_data.py > logs/populate.log 2>&1 &
+    echo "🔄 Starting background data population (NFL-only for now)..."
+    nohup python populate_data_nfl_only.py > logs/populate.log 2>&1 &
     echo "📱 Data population running in background, starting Streamlit..."
 fi
 
