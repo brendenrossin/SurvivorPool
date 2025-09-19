@@ -65,8 +65,9 @@ echo "📊 Attempting real data ingestion from Google Sheets..."
 python jobs/ingest_personal_sheets.py
 if [ $? -eq 0 ]; then
     echo "✅ Real data ingested successfully from Google Sheets"
+    echo "🧹 Real data replaces any mock data that was created"
 else
-    echo "⚠️ Real data ingestion failed, using mock data"
+    echo "⚠️ Real data ingestion failed, using mock data (if available)"
 fi
 
 echo "🚀 All data processing complete, starting Streamlit..."

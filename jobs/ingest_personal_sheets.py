@@ -15,6 +15,7 @@ from api.database import SessionLocal
 from api.models import Player, Pick, PickResult
 from api.sheets_personal_railway import RailwayPersonalSheetsClient
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 def parse_picks_data(picks_data):
     """Parse raw Google Sheets data into player picks"""
@@ -58,6 +59,15 @@ def ingest_players_and_picks(players_data):
         print("👥 Ingesting players and picks...")
 
         season = int(os.getenv('NFL_SEASON', 2025))
+
+        # Clear existing data to avoid conflicts with mock data
+        print("🧹 Clearing existing pick and player data...")
+        db.execute(text("DELETE FROM pick_results WHERE pick_id IN (SELECT pick_id FROM picks WHERE season = :season)"), {"season": season})
+        db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
+        db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
+        db.commit()
+        print("✅ Existing data cleared")
+
         players_created = 0
         picks_created = 0
         picks_updated = 0
