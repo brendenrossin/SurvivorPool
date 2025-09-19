@@ -22,6 +22,9 @@ COPY . .
 # Create logs directory
 RUN mkdir -p logs
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Expose port (Railway typically uses port 8080)
 EXPOSE 8080
 
@@ -30,4 +33,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/_stcore/health || exit 1
 
 # Run the application
-CMD ["sh", "-c", "streamlit run minimal_test.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false"]
+CMD ["./start.sh"]
