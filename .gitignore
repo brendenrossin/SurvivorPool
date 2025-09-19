@@ -40,11 +40,13 @@ MANIFEST
 *.sqlite
 *.sqlite3
 
-# Google Service Account credentials (just in case)
+# Google OAuth2 credentials and tokens (NEVER commit these!)
 credentials.json
-service-account-*.json
+token.json
 *-credentials.json
+*-token.json
 google-credentials.json
+.railway_oauth_token.txt
 
 # IDE and editor files
 .vscode/
