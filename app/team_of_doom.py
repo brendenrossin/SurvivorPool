@@ -166,6 +166,13 @@ def render_team_of_doom_widget(db, current_season: int):
 
         df = pd.DataFrame(doom_teams)
 
+        # Load team colors
+        from app.dashboard_data import load_team_data
+        team_data = load_team_data()
+
+        # Add team colors to dataframe
+        df["color"] = df["team"].apply(lambda team: team_data["teams"].get(team, {}).get("color", "#666666"))
+
         fig = px.bar(
             df,
             x="eliminations",
@@ -173,8 +180,8 @@ def render_team_of_doom_widget(db, current_season: int):
             orientation="h",
             title="Eliminations by Team",
             labels={"eliminations": "Players Eliminated", "team": "Team"},
-            color="eliminations",
-            color_continuous_scale="Reds"
+            color="team",
+            color_discrete_map={row["team"]: row["color"] for _, row in df.iterrows()}
         )
 
         fig.update_layout(

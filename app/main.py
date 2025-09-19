@@ -235,31 +235,34 @@ def render_weekly_picks_chart(summary):
         category_orders={"Team": df_sorted.sort_values('Count', ascending=False)['Team'].unique()}
     )
 
-    # Add text annotations for teams with >10 picks
-    for trace in fig.data:
-        team_name = trace.name
-        team_data = df_sorted[df_sorted["Team"] == team_name]
+    # Calculate proper annotation positions for stacked bars
+    week_annotations = []
+    for week in df_sorted["Week"].unique():
+        week_data = df_sorted[df_sorted["Week"] == week].sort_values('Count', ascending=False)
+        cumulative_y = 0
 
-        x_positions = []
-        y_positions = []
-        texts = []
-
-        for _, row in team_data.iterrows():
+        for _, row in week_data.iterrows():
             if row["Count"] >= 10:  # Only annotate if 10+ picks
-                x_positions.append(row["Week"])
-                y_positions.append(row["Count"] / 2)  # Middle of the bar
-                texts.append(team_name)
+                # Position text at center of this team's bar segment
+                y_center = cumulative_y + (row["Count"] / 2)
+                week_annotations.append({
+                    "x": row["Week"],
+                    "y": y_center,
+                    "text": row["Team"]
+                })
+            cumulative_y += row["Count"]
 
-        if x_positions:  # Only add annotations if there are any
-            fig.add_scatter(
-                x=x_positions,
-                y=y_positions,
-                text=texts,
-                mode="text",
-                textfont=dict(size=10, color="white"),
-                showlegend=False,
-                hoverinfo="skip"
-            )
+    # Add annotations
+    if week_annotations:
+        fig.add_scatter(
+            x=[ann["x"] for ann in week_annotations],
+            y=[ann["y"] for ann in week_annotations],
+            text=[ann["text"] for ann in week_annotations],
+            mode="text",
+            textfont=dict(size=10, color="white", family="Arial Black"),
+            showlegend=False,
+            hoverinfo="skip"
+        )
 
     fig.update_layout(
         height=400,  # Reduced for mobile
