@@ -1,0 +1,8 @@
+# Railway configuration for Score Updates Cron Job
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/score_update.py"
+cronSchedule = "0 17,18,19,20,21,22,23,0,1,2 * * 0,1"  # Sunday hourly + Monday night

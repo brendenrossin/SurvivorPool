@@ -51,6 +51,45 @@ def init_railway_db():
                 conn.execute(text(command))
 
         print("✅ Railway database initialized!")
+
+        # Apply odds integration migration
+        print("🎰 Applying odds integration migration...")
+
+        with engine.begin() as conn:
+            # Add point_spread column
+            try:
+                conn.execute(text("ALTER TABLE games ADD COLUMN point_spread REAL"))
+                print("✅ Added point_spread column")
+            except Exception as e:
+                if "already exists" in str(e) or "duplicate column" in str(e).lower():
+                    print("ℹ️  point_spread column already exists")
+                else:
+                    print(f"⚠️  Error adding point_spread: {e}")
+
+            # Add favorite_team column
+            try:
+                conn.execute(text("ALTER TABLE games ADD COLUMN favorite_team VARCHAR(50)"))
+                print("✅ Added favorite_team column")
+            except Exception as e:
+                if "already exists" in str(e) or "duplicate column" in str(e).lower():
+                    print("ℹ️  favorite_team column already exists")
+                else:
+                    print(f"⚠️  Error adding favorite_team: {e}")
+
+            # Add indexes for performance
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_games_point_spread ON games (point_spread)"))
+                print("✅ Added point_spread index")
+            except Exception as e:
+                print(f"⚠️  Error adding point_spread index: {e}")
+
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_games_favorite_team ON games (favorite_team)"))
+                print("✅ Added favorite_team index")
+            except Exception as e:
+                print(f"⚠️  Error adding favorite_team index: {e}")
+
+        print("🎉 Odds integration migration completed!")
         return True
 
     except Exception as e:

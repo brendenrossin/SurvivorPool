@@ -1,0 +1,8 @@
+# Railway configuration for Sheets Ingestion Cron Job
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/sheets_ingestion.py"
+cronSchedule = "0 14 * * *"  # Daily at 9:00 AM EST (14:00 UTC)
