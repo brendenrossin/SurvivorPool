@@ -29,6 +29,7 @@ from app.live_scores import render_live_scores_widget, render_compact_live_score
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.chaos_meter import render_chaos_meter_widget
+from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 
 # Load environment
 from dotenv import load_dotenv
@@ -165,25 +166,30 @@ def render_remaining_players_donut(summary):
     eliminated = total - remaining
     percentage = (remaining / total * 100) if total > 0 else 0
 
-    # Create donut chart
+    # Create mobile-optimized donut chart
+    colors = get_mobile_color_scheme()
     fig = go.Figure(data=[go.Pie(
         labels=['Remaining', 'Eliminated'],
         values=[remaining, eliminated],
         hole=0.6,
-        marker_colors=['#28a745', '#dc3545'],
-        textinfo='label'  # Only show labels, not percentages
+        marker_colors=[colors['remaining'], colors['eliminated']],
+        textinfo='label',  # Only show labels for better mobile experience
+        hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>"
     )])
 
+    # Add center annotation
     fig.update_layout(
-        annotations=[dict(text=f"{percentage:.1f}%<br>{remaining}/{total}",
-                         x=0.5, y=0.5, font_size=16, showarrow=False)],  # Smaller font for mobile
-        showlegend=True,
-        height=250,  # Reduced height for mobile
-        font=dict(size=10),  # Smaller overall font
-        margin=dict(t=0, b=0, l=0, r=0)
+        annotations=[dict(
+            text=f"{percentage:.1f}%<br>{remaining}/{total}",
+            x=0.5, y=0.5,
+            font_size=14,
+            showarrow=False,
+            font_color="black"
+        )]
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Render with mobile optimization
+    render_mobile_chart(fig, 'donut')
 
 def render_weekly_picks_chart(summary):
     """Render stacked bar chart for weekly picks"""
@@ -257,30 +263,20 @@ def render_weekly_picks_chart(summary):
                 })
             cumulative_y += row["Count"]
 
-    # Add annotations
+    # Add mobile-friendly annotations with better contrast
     if week_annotations:
         fig.add_scatter(
             x=[ann["x"] for ann in week_annotations],
             y=[ann["y"] for ann in week_annotations],
             text=[ann["text"] for ann in week_annotations],
             mode="text",
-            textfont=dict(size=10, color="white", family="Arial Black"),
+            textfont=dict(size=9, color="white", family="Arial Black"),
             showlegend=False,
             hoverinfo="skip"
         )
 
-    fig.update_layout(
-        height=400,  # Reduced for mobile
-        xaxis_title="Week",
-        yaxis_title="Picks",
-        font=dict(size=12),  # Better font size for mobile
-        showlegend=False,  # Remove legend for mobile
-        margin=dict(l=40, r=40, t=60, b=40),  # Reduced bottom margin since no legend
-        # Mobile-friendly responsive settings
-        autosize=True
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+    # Use mobile optimization
+    render_mobile_chart(fig, 'bar_chart')
 
 def render_player_search():
     """Render player search section"""

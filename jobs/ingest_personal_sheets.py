@@ -173,4 +173,6 @@ def main():
     return success
 
 if __name__ == "__main__":
-    main()
+    import sys
+    success = main()
+    sys.exit(0 if success else 1)

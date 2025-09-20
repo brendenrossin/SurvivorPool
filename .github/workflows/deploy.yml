@@ -2,7 +2,10 @@ name: Deploy to Railway
 
 on:
   push:
+    branches: [staging]  # Staging deploys from staging branch
+  pull_request:
     branches: [main]
+    types: [closed]  # Production deploys when PR to main is merged
   workflow_dispatch:
     inputs:
       environment:
@@ -16,7 +19,7 @@ on:
 
 jobs:
   deploy-staging:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
     runs-on: ubuntu-latest
     environment: staging
     steps:
@@ -58,7 +61,7 @@ jobs:
             })
 
   deploy-production:
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
     runs-on: ubuntu-latest
     environment: production
     needs: []  # Can run independently

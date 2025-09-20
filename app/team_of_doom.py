@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import List, Dict, Any
 import os
+from app.mobile_plotly_config import render_mobile_chart
 
 def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
     """
@@ -190,7 +191,8 @@ def render_team_of_doom_widget(db, current_season: int):
             showlegend=False
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        # Use mobile optimization for bar chart
+        render_mobile_chart(fig, 'bar_chart')
 
     with col2:
         # Top doom teams summary
