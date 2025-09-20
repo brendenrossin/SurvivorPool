@@ -106,15 +106,16 @@ def apply_mobile_optimization(fig, chart_type='default'):
     layout = get_mobile_layout(chart_type)
     fig.update_layout(**layout)
 
-    # Additional mobile optimizations
-    fig.update_traces(
-        # Increase hover target area for better touch interaction
-        hoverlabel=dict(
-            bgcolor="white",
-            bordercolor="black",
-            font_size=12
+    # Additional mobile optimizations (skip hover for gauge/indicator charts)
+    if chart_type != 'gauge':
+        fig.update_traces(
+            # Increase hover target area for better touch interaction
+            hoverlabel=dict(
+                bgcolor="white",
+                bordercolor="black",
+                font_size=12
+            )
         )
-    )
 
     return fig
 
