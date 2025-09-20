@@ -1,0 +1,7 @@
+# Railway configuration for Scores Cron Service
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/score_update.py"
