@@ -1,4 +1,5 @@
 # Railway configuration for Survivor Pool Dashboard - Main Web Service
+# Note: Cron services should use their own railway-[service].toml files
 
 [build]
 builder = "nixpacks"

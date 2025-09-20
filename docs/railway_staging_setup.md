@@ -1,12 +1,22 @@
 # Railway Staging & Production Deployment Setup
 
 ## Overview
-This setup provides a staging environment for testing changes before production deployment, with automated CI/CD pipeline.
+This setup provides a staging environment for testing changes before production deployment, with automated CI/CD pipeline using proper branching strategy.
 
 ## Architecture
-- **Staging**: Auto-deploys on every push to `main` branch
-- **Production**: Manual deployment after staging verification
+- **Staging**: Auto-deploys on every push to `staging` branch
+- **Production**: Auto-deploys when PR from `staging` → `main` is merged
 - **Cron Jobs**: Separate services for each environment
+
+## Branching Strategy
+```
+feature-branch → staging → main (production)
+```
+
+1. **Development**: Work on feature branches
+2. **Testing**: Merge to `staging` branch → triggers staging deployment
+3. **Validation**: Test staging environment thoroughly
+4. **Production**: Create PR from `staging` → `main` → merge triggers production deployment
 
 ## 1. Railway Project Setup
 
@@ -55,18 +65,46 @@ ENVIRONMENT=staging|production
 
 ## 4. Deployment Workflow
 
+### Proper Git Flow
+```bash
+# 1. Create feature branch
+git checkout -b feature/new-feature
+
+# 2. Develop and commit changes
+git add .
+git commit -m "Add new feature"
+
+# 3. Push to staging for testing
+git checkout staging
+git merge feature/new-feature
+git push origin staging  # ← Triggers staging deployment
+
+# 4. After validation, promote to production
+git checkout main
+git pull origin main
+# Create PR from staging → main (or merge directly)
+git merge staging
+git push origin main  # ← Triggers production deployment
+```
+
 ### Automatic Staging Deployment
-1. Push code to `main` branch
+1. Push code to `staging` branch
 2. GitHub Action automatically deploys to staging
 3. Staging URL updated with new version
-4. Test staging environment
+4. Test staging environment thoroughly
 
-### Manual Production Deployment
+### Automatic Production Deployment
+1. Create PR from `staging` → `main`
+2. Review changes and merge PR
+3. Production deployment triggers automatically
+4. Verification checks run automatically
+
+### Emergency Manual Deployment
+If needed, you can still deploy manually:
 1. Go to GitHub Actions → "Deploy to Railway"
 2. Click "Run workflow"
-3. Select "production" environment
-4. Production deployment starts
-5. Verification checks run automatically
+3. Select environment and branch
+4. Deployment starts immediately
 
 ## 5. Railway Service Configuration
 

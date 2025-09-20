@@ -17,11 +17,15 @@ def main():
     print(f"🕐 Starting sheets ingestion cron job at {datetime.now()}")
 
     try:
+        # Get the project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        script_path = os.path.join(project_root, "jobs", "ingest_personal_sheets.py")
+
         # Run the sheets ingestion script directly
         result = subprocess.run([
             sys.executable,
-            "jobs/ingest_personal_sheets.py"
-        ], capture_output=True, text=True, timeout=300)
+            script_path
+        ], capture_output=True, text=True, timeout=300, cwd=project_root)
 
         print("📊 Sheets ingestion output:")
         if result.stdout:
