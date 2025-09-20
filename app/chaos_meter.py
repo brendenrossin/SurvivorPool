@@ -93,12 +93,10 @@ def render_chaos_meter_widget(db, current_season: int):
     st.subheader("📊 Elimination Tracker")
     st.caption("Tracking survivor elimination rates week by week")
 
-    # Get all weeks with eliminations or completed games
+    # Get all weeks with picks (show current week even if no eliminations yet)
     from api.models import Game, Pick, PickResult
 
-    weeks_query = db.query(Pick.week).join(
-        PickResult, Pick.pick_id == PickResult.pick_id
-    ).filter(
+    weeks_query = db.query(Pick.week).filter(
         Pick.season == current_season
     ).distinct().order_by(Pick.week)
 
