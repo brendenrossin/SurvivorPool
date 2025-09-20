@@ -1,0 +1,7 @@
+# Railway configuration for Odds Cron Service
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/daily_odds_update.py"

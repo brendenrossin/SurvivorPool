@@ -1,0 +1,7 @@
+# Railway configuration for Sheets Cron Service
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python cron/sheets_ingestion.py"
