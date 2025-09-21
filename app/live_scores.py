@@ -172,7 +172,7 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
 
         live_scores.sort(key=sort_key)
 
-        # Show games in a compact table format
+        # Show games in modern card format
         for i in range(0, len(live_scores), 2):
             cols = st.columns(2)
 
@@ -181,69 +181,97 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                     game = live_scores[i + j]
 
                     with col:
-                        # Compact game display
+                        # Game card header with status
                         if game['status'] == 'in':
-                            status_emoji = "🔴"
+                            status_color = "#ff4444"
+                            status_text = "🔴 LIVE"
                         elif game['status'] == 'final':
-                            status_emoji = "✅"
+                            status_color = "#44ff44"
+                            status_text = "✅ FINAL"
                         else:
-                            status_emoji = "🕐"
+                            status_color = "#888888"
+                            status_text = game['status_display']
 
-                        # Show team logos with score
+                        # Custom CSS for modern card look
+                        st.markdown(f"""
+                        <div style="
+                            border: 2px solid {status_color};
+                            border-radius: 10px;
+                            padding: 15px;
+                            margin: 10px 0;
+                            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                        ">
+                            <div style="text-align: center; font-weight: bold; color: {status_color}; margin-bottom: 10px;">
+                                {status_text}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # Team matchup in clean format
                         from api.team_logos import get_team_logo_url
-
                         away_logo = get_team_logo_url(game['away_team'])
                         home_logo = get_team_logo_url(game['home_team'])
 
-                        # Create a mobile-optimized display
-                        col1, col2, col3 = st.columns([1, 1, 1])
+                        # Team vs Team layout
+                        team_col1, vs_col, team_col2 = st.columns([2, 1, 2])
 
-                        with col1:
-                            st.image(away_logo, width=30)
-                            st.caption(game['away_team'])
-                            # Show away team score under away team
+                        with team_col1:
+                            # Away team
+                            st.image(away_logo, width=25)
+                            st.markdown(f"**{game['away_team']}**")
                             if game['status'] != 'pre':
-                                st.write(f"**{game['away_score']}**")
+                                st.markdown(f"<h3 style='text-align: center; margin: 0;'>{game['away_score']}</h3>",
+                                          unsafe_allow_html=True)
 
-                        with col2:
-                            # Enhanced status chip display
-                            if game['status'] == 'in':
-                                st.markdown("🔴 **LIVE**")
-                            elif game['status'] == 'final':
-                                st.markdown("✅ **FINAL**")
-                            else:
-                                # For PRE games, show the date/time from status_display
-                                st.markdown(f"**{game['status_display']}**")
-
+                        with vs_col:
                             if game['status'] == 'pre':
-                                # For PRE games, show the odds/spread from score_display
-                                st.write(f"**{game['score_display']}**")
+                                st.markdown("<p style='text-align: center; margin: 20px 0;'>vs</p>",
+                                          unsafe_allow_html=True)
                             else:
-                                # For live/final games, show "vs" or "@"
-                                st.write("**@**")
+                                st.markdown("<p style='text-align: center; margin: 20px 0;'>@</p>",
+                                          unsafe_allow_html=True)
 
-                        with col3:
-                            st.image(home_logo, width=30)
-                            st.caption(game['home_team'])
-                            # Show home team score under home team
+                        with team_col2:
+                            # Home team
+                            st.image(home_logo, width=25)
+                            st.markdown(f"**{game['home_team']}**")
                             if game['status'] != 'pre':
-                                st.write(f"**{game['home_score']}**")
+                                st.markdown(f"<h3 style='text-align: center; margin: 0;'>{game['home_score']}</h3>",
+                                          unsafe_allow_html=True)
 
-                        # Show pickers if any
-                        all_pickers = game['away_pickers'] + game['home_pickers']
-                        if all_pickers:
-                            st.caption(f"Picked by: {', '.join(all_pickers)}")
-                        elif game['status'] == 'pre':
+                        # Show betting odds for PRE games
+                        if game['status'] == 'pre' and game['score_display'] != 'vs':
+                            st.markdown(f"<p style='text-align: center; color: #666; font-style: italic;'>{game['score_display']}</p>",
+                                      unsafe_allow_html=True)
+
+                        # Show kickoff time for PRE games
+                        if game['status'] == 'pre':
                             if game['kickoff']:
                                 from datetime import timezone, timedelta
                                 pst_tz = timezone(timedelta(hours=-8))
                                 kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
                                 kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p')
-                            else:
-                                kickoff_time = 'TBD'
-                            st.caption(f"Kickoff: {kickoff_time}")
+                                st.markdown(f"<p style='text-align: center; color: #666; font-size: 12px;'>Kickoff: {kickoff_time}</p>",
+                                          unsafe_allow_html=True)
 
-                        st.write("")  # Add some spacing
+                        # Expandable picker section
+                        all_pickers = game['away_pickers'] + game['home_pickers']
+                        if all_pickers:
+                            picker_count = len(all_pickers)
+                            with st.expander(f"📊 Picked by {picker_count} players"):
+                                # Group pickers by team
+                                if game['away_pickers']:
+                                    st.markdown(f"**{game['away_team']} ({len(game['away_pickers'])}):**")
+                                    st.write(", ".join(game['away_pickers']))
+
+                                if game['home_pickers']:
+                                    if game['away_pickers']:
+                                        st.write("")  # Add spacing
+                                    st.markdown(f"**{game['home_team']} ({len(game['home_pickers'])}):**")
+                                    st.write(", ".join(game['home_pickers']))
+
+                        st.write("")  # Card spacing
 
         # Add separator
         st.divider()
