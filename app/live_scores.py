@@ -201,6 +201,9 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                         with col1:
                             st.image(away_logo, width=30)
                             st.caption(game['away_team'])
+                            # Show away team score under away team
+                            if game['status'] != 'pre':
+                                st.write(f"**{game['away_score']}**")
 
                         with col2:
                             # Enhanced status chip display
@@ -212,15 +215,19 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                                 # For PRE games, show the date/time from status_display
                                 st.markdown(f"**{game['status_display']}**")
 
-                            if game['status'] != 'pre':
-                                st.write(f"**{game['score_display']}**")
-                            else:
+                            if game['status'] == 'pre':
                                 # For PRE games, show the odds/spread from score_display
                                 st.write(f"**{game['score_display']}**")
+                            else:
+                                # For live/final games, show "vs" or "@"
+                                st.write("**@**")
 
                         with col3:
                             st.image(home_logo, width=30)
                             st.caption(game['home_team'])
+                            # Show home team score under home team
+                            if game['status'] != 'pre':
+                                st.write(f"**{game['home_score']}**")
 
                         # Show pickers if any
                         all_pickers = game['away_pickers'] + game['home_pickers']
