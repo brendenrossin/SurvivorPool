@@ -106,10 +106,10 @@ class ESPNScoreProvider(ScoreProvider):
 
             if "pre" in status_type or "scheduled" in status_type:
                 status = "pre"
-            elif "in" in status_type or "progress" in status_type:
-                status = "in"
             elif "final" in status_type:
                 status = "final"
+            elif "in" in status_type or "progress" in status_type:
+                status = "in"
             else:
                 status = "pre"
 
