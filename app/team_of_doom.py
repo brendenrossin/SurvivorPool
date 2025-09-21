@@ -158,69 +158,48 @@ def render_team_of_doom_widget(db, current_season: int):
         st.info("No eliminations yet this season!")
         return
 
-    # Create columns for layout
-    col1, col2 = st.columns([2, 1])
+    # Bar chart of eliminations by team (single column layout)
+    doom_teams = doom_data["doom_teams"][:10]  # Top 10
 
-    with col1:
-        # Bar chart of eliminations by team
-        doom_teams = doom_data["doom_teams"][:10]  # Top 10
+    df = pd.DataFrame(doom_teams)
 
-        df = pd.DataFrame(doom_teams)
+    # Load team colors
+    from app.dashboard_data import load_team_data
+    team_data = load_team_data()
 
-        # Load team colors
-        from app.dashboard_data import load_team_data
-        team_data = load_team_data()
+    # Add team colors to dataframe
+    df["color"] = df["team"].apply(lambda team: team_data["teams"].get(team, {}).get("color", "#666666"))
 
-        # Add team colors to dataframe
-        df["color"] = df["team"].apply(lambda team: team_data["teams"].get(team, {}).get("color", "#666666"))
+    fig = px.bar(
+        df,
+        x="eliminations",
+        y="team",
+        orientation="h",
+        title="Eliminations by Team",
+        labels={"eliminations": "Players Eliminated", "team": "Team"},
+        color="team",
+        color_discrete_map={row["team"]: row["color"] for _, row in df.iterrows()}
+    )
 
-        fig = px.bar(
-            df,
-            x="eliminations",
-            y="team",
-            orientation="h",
-            title="Eliminations by Team",
-            labels={"eliminations": "Players Eliminated", "team": "Team"},
-            color="team",
-            color_discrete_map={row["team"]: row["color"] for _, row in df.iterrows()}
-        )
+    fig.update_layout(
+        height=400,
+        yaxis={'categoryorder': 'total ascending'},
+        showlegend=False
+    )
 
-        fig.update_layout(
-            height=400,
-            yaxis={'categoryorder': 'total ascending'},
-            showlegend=False
-        )
+    # Use mobile optimization for bar chart
+    render_mobile_chart(fig, 'bar_chart')
 
-        # Use mobile optimization for bar chart
-        render_mobile_chart(fig, 'bar_chart')
+    # Add summary stats below the chart
+    if doom_data["worst_week"]:
+        col1, col2 = st.columns(2)
 
-    with col2:
-        # Top doom teams summary
-        st.markdown("### 💀 Doom Leaderboard")
+        with col1:
+            st.metric("Total Eliminations", doom_data["total_eliminations"])
 
-        for i, team_data in enumerate(doom_teams[:5], 1):
-            team = team_data["team"]
-            count = team_data["eliminations"]
-
-            # Try to load team logo
-            logo_path = f"app/static/logos/{team}.png"
-
-            if os.path.exists(logo_path):
-                col_logo, col_info = st.columns([1, 3])
-                with col_logo:
-                    st.image(logo_path, width=40)
-                with col_info:
-                    st.markdown(f"**{i}. {team}**")
-                    st.caption(f"{count} eliminations")
-            else:
-                st.markdown(f"**{i}. {team}** - {count} eliminations")
-
-        # Worst week info
-        if doom_data["worst_week"]:
+        with col2:
             week_num, week_count = doom_data["worst_week"]
-            st.markdown("### 💥 Worst Week")
-            st.markdown(f"**Week {week_num}**")
-            st.caption(f"{week_count} eliminations")
+            st.metric("Worst Week", f"Week {week_num} ({week_count} eliminations)")
 
 def render_doom_details(db, current_season: int):
     """
