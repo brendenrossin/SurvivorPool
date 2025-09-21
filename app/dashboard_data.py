@@ -4,6 +4,7 @@ Data fetching functions for Streamlit dashboard
 
 import os
 import json
+import streamlit as st
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, text, select
@@ -12,14 +13,22 @@ from datetime import datetime
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult, Game, JobMeta
 
+@st.cache_resource
+def get_db_session():
+    """Get cached database session factory"""
+    return SessionLocal
+
+@st.cache_data
 def load_team_data() -> Dict:
     """Load team colors and metadata"""
     with open("db/seed_team_map.json", "r") as f:
         return json.load(f)
 
+@st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
 def get_summary_data(season: int) -> Dict:
     """Get summary data for dashboard"""
-    db = SessionLocal()
+    SessionFactory = get_db_session()
+    db = SessionFactory()
     try:
         # Get weeks with picks
         weeks_query = db.query(Pick.week).filter(Pick.season == season).distinct().all()
@@ -74,7 +83,8 @@ def get_summary_data(season: int) -> Dict:
 
 def get_player_data(player_name: str, season: int) -> Optional[Dict]:
     """Get individual player data"""
-    db = SessionLocal()
+    SessionFactory = get_db_session()
+    db = SessionFactory()
     try:
         player = db.query(Player).filter(Player.display_name == player_name).first()
         if not player:
@@ -112,9 +122,11 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
     finally:
         db.close()
 
+@st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
 def get_meme_stats(season: int) -> Dict:
     """Get meme statistics for dashboard"""
-    db = SessionLocal()
+    SessionFactory = get_db_session()
+    db = SessionFactory()
     try:
         # Dumbest picks (biggest losing margins) - grouped by team
         dumbest_query = text("""
@@ -229,9 +241,11 @@ def get_meme_stats(season: int) -> Dict:
     finally:
         db.close()
 
+@st.cache_data(ttl=300)  # 5 minute cache for player searches
 def search_players(query: str) -> List[str]:
     """Search for players by name"""
-    db = SessionLocal()
+    SessionFactory = get_db_session()
+    db = SessionFactory()
     try:
         players = db.query(Player.display_name).filter(
             Player.display_name.ilike(f"%{query}%")
