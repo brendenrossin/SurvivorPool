@@ -11,7 +11,35 @@ from datetime import datetime
 from typing import List, Dict, Any
 import os
 
-def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) -> Dict[str, Any]:
+def get_survivor_counts(db, game) -> Dict[str, int]:
+    """Calculate survivor counts for a final game"""
+    from api.models import Pick, PickResult, Player
+
+    if game.status != 'final':
+        return {'survived': 0, 'eliminated': 0}
+
+    try:
+        # Get picks and their results for this game
+        picks_query = db.query(Pick, PickResult.survived).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == game.season,
+            Pick.week == game.week,
+            (Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team)
+        )
+
+        picks_results = picks_query.all()
+
+        survived_count = sum(1 for pick, survived in picks_results if survived == True)
+        eliminated_count = sum(1 for pick, survived in picks_results if survived == False)
+
+        return {'survived': survived_count, 'eliminated': eliminated_count}
+
+    except Exception as e:
+        print(f"Error calculating survivor counts: {e}")
+        return {'survived': 0, 'eliminated': 0}
+
+def create_game_display(game, home_pickers: List[str], away_pickers: List[str], db=None) -> Dict[str, Any]:
     """Create display data for a single game"""
     from datetime import timezone, timedelta
 
@@ -48,6 +76,11 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) 
         status_display = game.status.upper()
         score_display = f"{game.home_score or 0} - {game.away_score or 0}"
 
+    # Get survivor counts for final games
+    survivor_counts = {'survived': 0, 'eliminated': 0}
+    if game.status == 'final' and db and (home_pickers or away_pickers):
+        survivor_counts = get_survivor_counts(db, game)
+
     return {
         'game_id': game.game_id,
         'away_team': game.away_team,
@@ -60,7 +93,8 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) 
         'kickoff': game.kickoff,
         'away_pickers': away_pickers,
         'home_pickers': home_pickers,
-        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0
+        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0,
+        'survivor_counts': survivor_counts
     }
 
 def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dict[str, Any]]:
@@ -96,7 +130,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
             # Build live scores with no pickers (show all games)
             live_scores = []
             for game in games:
-                live_scores.append(create_game_display(game, [], []))
+                live_scores.append(create_game_display(game, [], [], db))
 
             return live_scores
 
@@ -127,7 +161,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
                 if pick[0].team_abbr == game.away_team  # pick[0] is Pick
             ]
 
-            live_scores.append(create_game_display(game, home_pickers, away_pickers))
+            live_scores.append(create_game_display(game, home_pickers, away_pickers, db))
 
         return live_scores
 
@@ -172,106 +206,73 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
 
         live_scores.sort(key=sort_key)
 
-        # Show games in modern card format
-        for i in range(0, len(live_scores), 2):
-            cols = st.columns(2)
+        # Show games in simple text format (no complex layouts)
+        st.write(f"DEBUG: About to render {len(live_scores)} games")
 
-            for j, col in enumerate(cols):
-                if i + j < len(live_scores):
-                    game = live_scores[i + j]
+        for i, game in enumerate(live_scores):
+            try:
+                st.write(f"DEBUG: Rendering game {i+1}: {game['away_team']} @ {game['home_team']}")
 
-                    with col:
-                        # Game card header with status
-                        if game['status'] == 'in':
-                            status_color = "#ff4444"
-                            status_text = "🔴 LIVE"
-                        elif game['status'] == 'final':
-                            status_color = "#44ff44"
-                            status_text = "✅ FINAL"
-                        else:
-                            status_color = "#888888"
-                            status_text = game['status_display']
+                # Simple game header with status
+                if game['status'] == 'in':
+                    status_text = "🔴 **LIVE**"
+                elif game['status'] == 'final':
+                    status_text = "✅ **FINAL**"
+                else:
+                    status_text = f"🕐 **{game['status_display']}**"
 
-                        # Custom CSS for modern card look
-                        st.markdown(f"""
-                        <div style="
-                            border: 2px solid {status_color};
-                            border-radius: 10px;
-                            padding: 15px;
-                            margin: 10px 0;
-                            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-                            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-                        ">
-                            <div style="text-align: center; font-weight: bold; color: {status_color}; margin-bottom: 10px;">
-                                {status_text}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                # Basic game info
+                if game['status'] != 'pre':
+                    game_line = f"{status_text} {game['away_team']} {game['away_score']} - {game['home_score']} {game['home_team']}"
+                else:
+                    game_line = f"{status_text} {game['away_team']} @ {game['home_team']}"
 
-                        # Team matchup in clean format
-                        from api.team_logos import get_team_logo_url
-                        away_logo = get_team_logo_url(game['away_team'])
-                        home_logo = get_team_logo_url(game['home_team'])
+                st.markdown(game_line)
 
-                        # Team vs Team layout
-                        team_col1, vs_col, team_col2 = st.columns([2, 1, 2])
+                # Show kickoff time for PRE games
+                if game['status'] == 'pre' and game['kickoff']:
+                    from datetime import timezone, timedelta
+                    pst_tz = timezone(timedelta(hours=-8))
+                    kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+                    kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p PST')
+                    st.caption(f"Kickoff: {kickoff_time}")
 
-                        with team_col1:
-                            # Away team
-                            st.image(away_logo, width=25)
-                            st.markdown(f"**{game['away_team']}**")
-                            if game['status'] != 'pre':
-                                st.markdown(f"<h3 style='text-align: center; margin: 0;'>{game['away_score']}</h3>",
-                                          unsafe_allow_html=True)
+                # Show betting odds for PRE games
+                if game['status'] == 'pre' and game['score_display'] != 'vs':
+                    st.caption(f"Line: {game['score_display']}")
 
-                        with vs_col:
-                            if game['status'] == 'pre':
-                                st.markdown("<p style='text-align: center; margin: 20px 0;'>vs</p>",
-                                          unsafe_allow_html=True)
-                            else:
-                                st.markdown("<p style='text-align: center; margin: 20px 0;'>@</p>",
-                                          unsafe_allow_html=True)
+                # Show elimination summary for final games
+                if game['status'] == 'final' and game['has_pickers']:
+                    survivor_counts = game['survivor_counts']
+                    survived = survivor_counts['survived']
+                    eliminated = survivor_counts['eliminated']
 
-                        with team_col2:
-                            # Home team
-                            st.image(home_logo, width=25)
-                            st.markdown(f"**{game['home_team']}**")
-                            if game['status'] != 'pre':
-                                st.markdown(f"<h3 style='text-align: center; margin: 0;'>{game['home_score']}</h3>",
-                                          unsafe_allow_html=True)
+                    if survived > 0 or eliminated > 0:
+                        st.success(f"🟢 **{survived} players survive to next week!**")
+                        if eliminated > 0:
+                            st.error(f"💀 **{eliminated} players to the graveyard!**")
 
-                        # Show betting odds for PRE games
-                        if game['status'] == 'pre' and game['score_display'] != 'vs':
-                            st.markdown(f"<p style='text-align: center; color: #666; font-style: italic;'>{game['score_display']}</p>",
-                                      unsafe_allow_html=True)
+                # Show picker info
+                all_pickers = game['away_pickers'] + game['home_pickers']
+                if all_pickers:
+                    picker_count = len(all_pickers)
+                    with st.expander(f"📊 Picked by {picker_count} players"):
+                        # Group pickers by team
+                        if game['away_pickers']:
+                            st.markdown(f"**{game['away_team']} ({len(game['away_pickers'])}):**")
+                            st.write(", ".join(game['away_pickers']))
 
-                        # Show kickoff time for PRE games
-                        if game['status'] == 'pre':
-                            if game['kickoff']:
-                                from datetime import timezone, timedelta
-                                pst_tz = timezone(timedelta(hours=-8))
-                                kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-                                kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p')
-                                st.markdown(f"<p style='text-align: center; color: #666; font-size: 12px;'>Kickoff: {kickoff_time}</p>",
-                                          unsafe_allow_html=True)
+                        if game['home_pickers']:
+                            if game['away_pickers']:
+                                st.write("")  # Add spacing
+                            st.markdown(f"**{game['home_team']} ({len(game['home_pickers'])}):**")
+                            st.write(", ".join(game['home_pickers']))
 
-                        # Expandable picker section
-                        all_pickers = game['away_pickers'] + game['home_pickers']
-                        if all_pickers:
-                            picker_count = len(all_pickers)
-                            with st.expander(f"📊 Picked by {picker_count} players"):
-                                # Group pickers by team
-                                if game['away_pickers']:
-                                    st.markdown(f"**{game['away_team']} ({len(game['away_pickers'])}):**")
-                                    st.write(", ".join(game['away_pickers']))
+                st.write("")  # Add spacing between games
 
-                                if game['home_pickers']:
-                                    if game['away_pickers']:
-                                        st.write("")  # Add spacing
-                                    st.markdown(f"**{game['home_team']} ({len(game['home_pickers'])}):**")
-                                    st.write(", ".join(game['home_pickers']))
-
-                        st.write("")  # Card spacing
+            except Exception as e:
+                st.error(f"Error rendering game {i+1}: {e}")
+                continue
 
         # Add separator
         st.divider()
