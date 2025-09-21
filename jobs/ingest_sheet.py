@@ -28,7 +28,7 @@ class SheetIngestor:
         """Main ingestion process"""
         db = SessionLocal()
         try:
-            print(f"Starting sheet ingestion at {datetime.now()}")
+            print(f"Starting sheet ingestion at {datetime.now(timezone.utc)}")
 
             # Update job meta
             self.update_job_meta(db, "ingest_sheet", "running", "Starting ingestion")
@@ -41,8 +41,8 @@ class SheetIngestor:
             players_created = self.upsert_players(db, parsed_data["players"])
             picks_updated = self.upsert_picks(db, parsed_data["picks"])
 
-            # Validate picks and update results
-            validation_updates = self.validate_picks(db)
+            # Skip validation - commissioner's sheet is source of truth
+            validation_updates = 0
 
             db.commit()
 
@@ -53,6 +53,10 @@ class SheetIngestor:
 
         except Exception as e:
             db.rollback()
+            import traceback
+            print("=== FULL TRACEBACK ===")
+            traceback.print_exc()
+            print("=== END TRACEBACK ===")
             error_msg = f"Error during sheet ingestion: {str(e)}"
             self.update_job_meta(db, "ingest_sheet", "error", error_msg)
             print(error_msg)
@@ -95,17 +99,10 @@ class SheetIngestor:
             ).first()
 
             if existing_pick:
-                # Check if pick is locked
-                pick_result = db.query(PickResult).filter(
-                    PickResult.pick_id == existing_pick.pick_id
-                ).first()
-
-                if pick_result and pick_result.is_locked:
-                    continue  # Don't update locked picks
-
-                # Update team if different
+                # Commissioner's sheet is source of truth - always update
                 if existing_pick.team_abbr != pick_data["team_abbr"]:
                     existing_pick.team_abbr = pick_data["team_abbr"]
+                    existing_pick.source = "google_sheets"  # Update source
                     existing_pick.picked_at = datetime.now(timezone.utc)
                     updated_count += 1
             else:
@@ -171,7 +168,12 @@ class SheetIngestor:
 
                     # Check if game has started (lock logic)
                     now = datetime.now(timezone.utc)
-                    if now >= game.kickoff and not pick_result.is_locked:
+                    # Ensure game.kickoff is timezone-aware for comparison
+                    game_kickoff = game.kickoff
+                    if game_kickoff.tzinfo is None:
+                        game_kickoff = game_kickoff.replace(tzinfo=timezone.utc)
+
+                    if now >= game_kickoff and not pick_result.is_locked:
                         pick_result.is_locked = True
                         updated_count += 1
 

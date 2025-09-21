@@ -207,11 +207,8 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
         live_scores.sort(key=sort_key)
 
         # Show games in simple text format (no complex layouts)
-        st.write(f"DEBUG: About to render {len(live_scores)} games")
-
         for i, game in enumerate(live_scores):
             try:
-                st.write(f"DEBUG: Rendering game {i+1}: {game['away_team']} @ {game['home_team']}")
 
                 # Simple game header with status
                 if game['status'] == 'in':
@@ -252,21 +249,17 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                         if eliminated > 0:
                             st.error(f"💀 **{eliminated} players to the graveyard!**")
 
-                # Show picker info
+                # Show picker info (without nested expander)
                 all_pickers = game['away_pickers'] + game['home_pickers']
                 if all_pickers:
                     picker_count = len(all_pickers)
-                    with st.expander(f"📊 Picked by {picker_count} players"):
-                        # Group pickers by team
-                        if game['away_pickers']:
-                            st.markdown(f"**{game['away_team']} ({len(game['away_pickers'])}):**")
-                            st.write(", ".join(game['away_pickers']))
+                    st.caption(f"📊 Picked by {picker_count} players")
 
-                        if game['home_pickers']:
-                            if game['away_pickers']:
-                                st.write("")  # Add spacing
-                            st.markdown(f"**{game['home_team']} ({len(game['home_pickers'])}):**")
-                            st.write(", ".join(game['home_pickers']))
+                    # Show picker summary without expansion
+                    if game['away_pickers']:
+                        st.caption(f"**{game['away_team']}**: {len(game['away_pickers'])} players")
+                    if game['home_pickers']:
+                        st.caption(f"**{game['home_team']}**: {len(game['home_pickers'])} players")
 
                 st.write("")  # Add spacing between games
 
