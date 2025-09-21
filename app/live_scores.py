@@ -11,7 +11,35 @@ from datetime import datetime
 from typing import List, Dict, Any
 import os
 
-def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) -> Dict[str, Any]:
+def get_survivor_counts(db, game) -> Dict[str, int]:
+    """Calculate survivor counts for a final game"""
+    from api.models import Pick, PickResult, Player
+
+    if game.status != 'final':
+        return {'survived': 0, 'eliminated': 0}
+
+    try:
+        # Get picks and their results for this game
+        picks_query = db.query(Pick, PickResult.survived).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == game.season,
+            Pick.week == game.week,
+            (Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team)
+        )
+
+        picks_results = picks_query.all()
+
+        survived_count = sum(1 for pick, survived in picks_results if survived == True)
+        eliminated_count = sum(1 for pick, survived in picks_results if survived == False)
+
+        return {'survived': survived_count, 'eliminated': eliminated_count}
+
+    except Exception as e:
+        print(f"Error calculating survivor counts: {e}")
+        return {'survived': 0, 'eliminated': 0}
+
+def create_game_display(game, home_pickers: List[str], away_pickers: List[str], db=None) -> Dict[str, Any]:
     """Create display data for a single game"""
     from datetime import timezone, timedelta
 
@@ -48,6 +76,11 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) 
         status_display = game.status.upper()
         score_display = f"{game.home_score or 0} - {game.away_score or 0}"
 
+    # Get survivor counts for final games
+    survivor_counts = {'survived': 0, 'eliminated': 0}
+    if game.status == 'final' and db and (home_pickers or away_pickers):
+        survivor_counts = get_survivor_counts(db, game)
+
     return {
         'game_id': game.game_id,
         'away_team': game.away_team,
@@ -60,7 +93,8 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) 
         'kickoff': game.kickoff,
         'away_pickers': away_pickers,
         'home_pickers': home_pickers,
-        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0
+        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0,
+        'survivor_counts': survivor_counts
     }
 
 def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dict[str, Any]]:
@@ -96,7 +130,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
             # Build live scores with no pickers (show all games)
             live_scores = []
             for game in games:
-                live_scores.append(create_game_display(game, [], []))
+                live_scores.append(create_game_display(game, [], [], db))
 
             return live_scores
 
@@ -127,7 +161,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
                 if pick[0].team_abbr == game.away_team  # pick[0] is Pick
             ]
 
-            live_scores.append(create_game_display(game, home_pickers, away_pickers))
+            live_scores.append(create_game_display(game, home_pickers, away_pickers, db))
 
         return live_scores
 
@@ -172,78 +206,73 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
 
         live_scores.sort(key=sort_key)
 
-        # Show games in a compact table format
-        for i in range(0, len(live_scores), 2):
-            cols = st.columns(2)
+        # Show games in simple text format (no complex layouts)
+        st.write(f"DEBUG: About to render {len(live_scores)} games")
 
-            for j, col in enumerate(cols):
-                if i + j < len(live_scores):
-                    game = live_scores[i + j]
+        for i, game in enumerate(live_scores):
+            try:
+                st.write(f"DEBUG: Rendering game {i+1}: {game['away_team']} @ {game['home_team']}")
 
-                    with col:
-                        # Compact game display
-                        if game['status'] == 'in':
-                            status_emoji = "🔴"
-                        elif game['status'] == 'final':
-                            status_emoji = "✅"
-                        else:
-                            status_emoji = "🕐"
+                # Simple game header with status
+                if game['status'] == 'in':
+                    status_text = "🔴 **LIVE**"
+                elif game['status'] == 'final':
+                    status_text = "✅ **FINAL**"
+                else:
+                    status_text = f"🕐 **{game['status_display']}**"
 
-                        # Show team logos with score
-                        from api.team_logos import get_team_logo_url
+                # Basic game info
+                if game['status'] != 'pre':
+                    game_line = f"{status_text} {game['away_team']} {game['away_score']} - {game['home_score']} {game['home_team']}"
+                else:
+                    game_line = f"{status_text} {game['away_team']} @ {game['home_team']}"
 
-                        away_logo = get_team_logo_url(game['away_team'])
-                        home_logo = get_team_logo_url(game['home_team'])
+                st.markdown(game_line)
 
-                        # Create a mobile-optimized display
-                        col1, col2, col3 = st.columns([1, 1, 1])
+                # Show kickoff time for PRE games
+                if game['status'] == 'pre' and game['kickoff']:
+                    from datetime import timezone, timedelta
+                    pst_tz = timezone(timedelta(hours=-8))
+                    kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+                    kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p PST')
+                    st.caption(f"Kickoff: {kickoff_time}")
 
-                        with col1:
-                            st.image(away_logo, width=30)
-                            st.caption(game['away_team'])
-                            # Show away team score under away team
-                            if game['status'] != 'pre':
-                                st.write(f"**{game['away_score']}**")
+                # Show betting odds for PRE games
+                if game['status'] == 'pre' and game['score_display'] != 'vs':
+                    st.caption(f"Line: {game['score_display']}")
 
-                        with col2:
-                            # Enhanced status chip display
-                            if game['status'] == 'in':
-                                st.markdown("🔴 **LIVE**")
-                            elif game['status'] == 'final':
-                                st.markdown("✅ **FINAL**")
-                            else:
-                                # For PRE games, show the date/time from status_display
-                                st.markdown(f"**{game['status_display']}**")
+                # Show elimination summary for final games
+                if game['status'] == 'final' and game['has_pickers']:
+                    survivor_counts = game['survivor_counts']
+                    survived = survivor_counts['survived']
+                    eliminated = survivor_counts['eliminated']
 
-                            if game['status'] == 'pre':
-                                # For PRE games, show the odds/spread from score_display
-                                st.write(f"**{game['score_display']}**")
-                            else:
-                                # For live/final games, show "vs" or "@"
-                                st.write("**@**")
+                    if survived > 0 or eliminated > 0:
+                        st.success(f"🟢 **{survived} players survive to next week!**")
+                        if eliminated > 0:
+                            st.error(f"💀 **{eliminated} players to the graveyard!**")
 
-                        with col3:
-                            st.image(home_logo, width=30)
-                            st.caption(game['home_team'])
-                            # Show home team score under home team
-                            if game['status'] != 'pre':
-                                st.write(f"**{game['home_score']}**")
+                # Show picker info
+                all_pickers = game['away_pickers'] + game['home_pickers']
+                if all_pickers:
+                    picker_count = len(all_pickers)
+                    with st.expander(f"📊 Picked by {picker_count} players"):
+                        # Group pickers by team
+                        if game['away_pickers']:
+                            st.markdown(f"**{game['away_team']} ({len(game['away_pickers'])}):**")
+                            st.write(", ".join(game['away_pickers']))
 
-                        # Show pickers if any
-                        all_pickers = game['away_pickers'] + game['home_pickers']
-                        if all_pickers:
-                            st.caption(f"Picked by: {', '.join(all_pickers)}")
-                        elif game['status'] == 'pre':
-                            if game['kickoff']:
-                                from datetime import timezone, timedelta
-                                pst_tz = timezone(timedelta(hours=-8))
-                                kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-                                kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p')
-                            else:
-                                kickoff_time = 'TBD'
-                            st.caption(f"Kickoff: {kickoff_time}")
+                        if game['home_pickers']:
+                            if game['away_pickers']:
+                                st.write("")  # Add spacing
+                            st.markdown(f"**{game['home_team']} ({len(game['home_pickers'])}):**")
+                            st.write(", ".join(game['home_pickers']))
 
-                        st.write("")  # Add some spacing
+                st.write("")  # Add spacing between games
+
+            except Exception as e:
+                st.error(f"Error rendering game {i+1}: {e}")
+                continue
 
         # Add separator
         st.divider()
