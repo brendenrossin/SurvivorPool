@@ -195,6 +195,11 @@ class ScoreUpdater:
                 is_game_complete = hours_since_kickoff > 4
 
             if is_game_complete:
+                # Mark game as final if it's complete but still shows as 'in'
+                if game.status != "final":
+                    game.status = "final"
+                    updated_count += 1
+
                 # Determine winner if not already set
                 if game.winner_abbr is None and game.home_score is not None and game.away_score is not None:
                     if game.home_score > game.away_score:
@@ -202,6 +207,7 @@ class ScoreUpdater:
                     elif game.away_score > game.home_score:
                         game.winner_abbr = game.away_team
                     # Ties leave winner_abbr as None
+                    updated_count += 1
 
                 # Update pick survival status
                 if game.winner_abbr is not None:

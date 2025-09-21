@@ -3,6 +3,15 @@ Survivor Pool Dashboard - Streamlit App
 """
 
 import streamlit as st
+
+# Configure Streamlit FIRST, before any other imports that might trigger Streamlit
+st.set_page_config(
+    page_title="Survivor 2025 - Live Dashboard",
+    page_icon="🏈",
+    layout="wide",
+    initial_sidebar_state="collapsed"  # Better for mobile
+)
+
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -40,15 +49,16 @@ SEASON = int(os.getenv("NFL_SEASON", 2025))
 team_data = load_team_data()
 
 def main():
-    st.set_page_config(
-        page_title=f"Survivor {SEASON} - Live Dashboard",
-        page_icon="🏈",
-        layout="wide",
-        initial_sidebar_state="collapsed"  # Better for mobile
-    )
 
     # Header
     st.title(f"Survivor {SEASON} — Live Dashboard")
+
+    # Last updated chip at top for transparency
+    try:
+        summary_preview = get_summary_data(SEASON)
+        render_last_updated_chip(summary_preview.get("last_updates", {}))
+    except:
+        pass  # If data not available, skip the timestamp
 
     # Live Scores Widget (top of page)
     try:
@@ -57,17 +67,21 @@ def main():
 
         # Get current week from database (NO API CALLS!)
         db = SessionLocal()
+        try:
+            # Find the latest week with games in database
+            latest_week_result = db.query(Game.week).filter(
+                Game.season == SEASON
+            ).order_by(Game.week.desc()).first()
 
-        # Find the latest week with games in database
-        latest_week_result = db.query(Game.week).filter(
-            Game.season == SEASON
-        ).order_by(Game.week.desc()).first()
+            current_week = latest_week_result.week if latest_week_result else 1
 
-        current_week = latest_week_result.week if latest_week_result else 1
-
-        # Render live scores from database only
-        render_live_scores_widget(db, SEASON, current_week)
-        db.close()
+            # Render live scores from database only
+            render_live_scores_widget(db, SEASON, current_week)
+        finally:
+            try:
+                db.close()
+            except:
+                pass
 
         st.divider()
     except Exception as e:
@@ -128,24 +142,39 @@ def main():
     with tab1:
         try:
             db = SessionLocal()
-            render_team_of_doom_widget(db, SEASON)
-            db.close()
+            try:
+                render_team_of_doom_widget(db, SEASON)
+            finally:
+                try:
+                    db.close()
+                except:
+                    pass
         except Exception as e:
             st.info("💀 Team of Doom will appear once eliminations start happening!")
 
     with tab2:
         try:
             db = SessionLocal()
-            render_graveyard_widget(db, SEASON)
-            db.close()
+            try:
+                render_graveyard_widget(db, SEASON)
+            finally:
+                try:
+                    db.close()
+                except:
+                    pass
         except Exception as e:
             st.info("⚰️ Graveyard will fill up as players get eliminated!")
 
     with tab3:
         try:
             db = SessionLocal()
-            render_chaos_meter_widget(db, SEASON)
-            db.close()
+            try:
+                render_chaos_meter_widget(db, SEASON)
+            finally:
+                try:
+                    db.close()
+                except:
+                    pass
         except Exception as e:
             st.info("📊 Elimination Tracker will activate once eliminations begin!")
 
@@ -166,13 +195,13 @@ def render_remaining_players_donut(summary):
     eliminated = total - remaining
     percentage = (remaining / total * 100) if total > 0 else 0
 
-    # Create mobile-optimized donut chart
-    colors = get_mobile_color_scheme()
+    # Create mobile-optimized donut chart with consistent colors
+    mobile_colors = get_mobile_color_scheme()
     fig = go.Figure(data=[go.Pie(
         labels=['Remaining', 'Eliminated'],
         values=[remaining, eliminated],
         hole=0.6,
-        marker_colors=[colors['remaining'], colors['eliminated']],
+        marker_colors=[mobile_colors['remaining'], mobile_colors['eliminated']],
         textinfo='label',  # Only show labels for better mobile experience
         hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>"
     )])
@@ -191,6 +220,11 @@ def render_remaining_players_donut(summary):
     # Render with mobile optimization
     render_mobile_chart(fig, 'donut')
 
+def get_team_color_map():
+    """Get centralized team color mapping"""
+    team_data = load_team_data()
+    return {team: data.get("color", "#666666") for team, data in team_data["teams"].items()}
+
 def render_weekly_picks_chart(summary):
     """Render stacked bar chart for weekly picks"""
 
@@ -198,8 +232,8 @@ def render_weekly_picks_chart(summary):
         st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
         return
 
-    # Load team data for colors
-    team_data = load_team_data()
+    # Get centralized color map
+    color_map = get_team_color_map()
 
     # Prepare data for stacked bar chart
     chart_data = []
@@ -209,14 +243,10 @@ def render_weekly_picks_chart(summary):
             team = team_item["team"]
             count = team_item["count"]
 
-            # Get team color
-            team_color = team_data["teams"].get(team, {}).get("color", "#666666")
-
             chart_data.append({
                 "Week": f"Week {week}",
                 "Team": team,
-                "Count": count,
-                "Color": team_color
+                "Count": count
             })
 
     if not chart_data:
@@ -229,38 +259,39 @@ def render_weekly_picks_chart(summary):
     # Group by Week and sort by Count within each week (largest first = bottom of stack)
     df_sorted = df.sort_values(['Week', 'Count'], ascending=[True, False])
 
-    # Create stacked bar chart
+    # Create stacked bar chart with consistent color mapping
     fig = px.bar(
         df_sorted,
         x="Week",
         y="Count",
         color="Team",
-        color_discrete_map={team: color for team, color in
-                           zip(df_sorted["Team"], df_sorted["Color"])},
+        color_discrete_map=color_map,  # Use centralized color map
         title="📊 Team Picks by Week",
         category_orders={"Team": df_sorted.sort_values('Count', ascending=False)['Team'].unique()}
     )
 
-    # Calculate proper annotation positions for stacked bars
+    # Calculate proper annotation positions for stacked bars - mobile optimized
     week_annotations = []
     for week in df_sorted["Week"].unique():
         # Get data for this week and sort by count descending (largest first = bottom of stack)
         week_data = df_sorted[df_sorted["Week"] == week].sort_values('Count', ascending=False)
         cumulative_y = 0
 
+        # Get top-3 teams for annotation (mobile optimization)
+        top_3_teams = set(week_data.head(3)["Team"].tolist())
+
         for _, row in week_data.iterrows():
-            if row["Count"] >= 10:  # Only annotate if 10+ picks
+            # Only annotate top-3 teams with minimum threshold
+            if row["Team"] in top_3_teams and row["Count"] >= 5:
                 # Position text at center of this team's bar segment
-                # Add small offset to account for bar borders/spacing
-                segment_start = cumulative_y
-                segment_end = cumulative_y + row["Count"]
-                y_center = segment_start + (row["Count"] / 2)
+                y_center = cumulative_y + (row["Count"] / 2)
 
                 week_annotations.append({
                     "x": row["Week"],
                     "y": y_center,
                     "text": row["Team"]
                 })
+
             cumulative_y += row["Count"]
 
     # Add mobile-friendly annotations with better contrast
@@ -375,6 +406,19 @@ def render_meme_stats(meme_stats):
         else:
             st.info("💪 **No risky wins yet!**\n\nBig balls picks show road wins and underdog victories. The riskier the pick, the bigger the glory!")
 
+def render_last_updated_chip(last_updates):
+    """Render last updated timestamp at top of page"""
+    from datetime import timezone, timedelta
+
+    # Prefer scores timestamp if present, else ingest
+    ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")
+    if ts:
+        # Convert UTC to PST (UTC-8)
+        pst_tz = timezone(timedelta(hours=-8))
+        ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
+        label = ts_pst.strftime("%m/%d %H:%M")
+        st.caption(f"🕒 Last updated: {label} (PST)")
+
 def render_footer(last_updates):
     """Render footer with update information"""
     st.divider()
@@ -382,14 +426,19 @@ def render_footer(last_updates):
     col1, col2 = st.columns(2)
 
     with col1:
+        from datetime import timezone, timedelta
+        pst_tz = timezone(timedelta(hours=-8))
+
         st.caption("**Data Sources:**")
         if "ingest_sheet" in last_updates and last_updates["ingest_sheet"]:
-            sheet_time = last_updates["ingest_sheet"].strftime("%m/%d %H:%M")
-            st.caption(f"📊 Picks: {sheet_time}")
+            sheet_time_pst = last_updates["ingest_sheet"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+            sheet_time = sheet_time_pst.strftime("%m/%d %H:%M")
+            st.caption(f"📊 Picks: {sheet_time} PST")
 
         if "update_scores" in last_updates and last_updates["update_scores"]:
-            scores_time = last_updates["update_scores"].strftime("%m/%d %H:%M")
-            st.caption(f"🏈 Scores: {scores_time}")
+            scores_time_pst = last_updates["update_scores"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+            scores_time = scores_time_pst.strftime("%m/%d %H:%M")
+            st.caption(f"🏈 Scores: {scores_time} PST")
 
     with col2:
         st.caption("*Survivor Pool Dashboard - Real-time NFL elimination tracking*")
