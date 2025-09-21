@@ -13,16 +13,24 @@ import os
 
 def create_game_display(game, home_pickers: List[str], away_pickers: List[str]) -> Dict[str, Any]:
     """Create display data for a single game"""
+    from datetime import timezone, timedelta
+
     # Determine game status display
     if game.status == 'pre':
-        status_display = f"🕐 {game.kickoff.strftime('%a %I:%M %p ET')}"
+        # Convert kickoff time to PST
+        pst_tz = timezone(timedelta(hours=-8))
+        if game.kickoff:
+            kickoff_pst = game.kickoff.replace(tzinfo=timezone.utc).astimezone(pst_tz)
+            status_display = f"🕐 {kickoff_pst.strftime('%m/%d %I:%M %p')}"
+        else:
+            status_display = "🕐 TBD"
 
         # Show spread if available, otherwise "vs"
         if game.point_spread and game.favorite_team:
             if game.favorite_team == game.home_team:
-                score_display = f"vs ({game.home_team} -{game.point_spread})"  # Home favored
+                score_display = f"{game.home_team} -{game.point_spread}"  # Home favored
             else:
-                score_display = f"vs ({game.favorite_team} -{game.point_spread})"  # Away favored
+                score_display = f"{game.favorite_team} -{game.point_spread}"  # Away favored
         else:
             score_display = "vs"
     elif game.status == 'in':
@@ -195,11 +203,20 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                             st.caption(game['away_team'])
 
                         with col2:
-                            st.write(f"{status_emoji}")
+                            # Enhanced status chip display
+                            if game['status'] == 'in':
+                                st.markdown("🔴 **LIVE**")
+                            elif game['status'] == 'final':
+                                st.markdown("✅ **FINAL**")
+                            else:
+                                # For PRE games, show the date/time from status_display
+                                st.markdown(f"**{game['status_display']}**")
+
                             if game['status'] != 'pre':
                                 st.write(f"**{game['score_display']}**")
                             else:
-                                st.write("vs")
+                                # For PRE games, show the odds/spread from score_display
+                                st.write(f"**{game['score_display']}**")
 
                         with col3:
                             st.image(home_logo, width=30)
@@ -210,7 +227,13 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
                         if all_pickers:
                             st.caption(f"Picked by: {', '.join(all_pickers)}")
                         elif game['status'] == 'pre':
-                            kickoff_time = game['kickoff'].strftime('%a %I:%M %p') if game['kickoff'] else 'TBD'
+                            if game['kickoff']:
+                                from datetime import timezone, timedelta
+                                pst_tz = timezone(timedelta(hours=-8))
+                                kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+                                kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p')
+                            else:
+                                kickoff_time = 'TBD'
                             st.caption(f"Kickoff: {kickoff_time}")
 
                         st.write("")  # Add some spacing
@@ -237,21 +260,24 @@ def render_compact_live_scores(db, current_season: int, current_week: int):
     ]
 
     if not active_games:
+        from datetime import timezone, timedelta
         next_game = min(live_scores, key=lambda x: x['kickoff'])
+        pst_tz = timezone(timedelta(hours=-8))
+        kickoff_pst = next_game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
         st.caption(f"Next: {next_game['away_team']} @ {next_game['home_team']}")
-        st.caption(f"{next_game['kickoff'].strftime('%a %I:%M %p ET')}")
+        st.caption(f"{kickoff_pst.strftime('%m/%d %I:%M %p')}")
         return
 
     for game in active_games:
-        # Create a compact one-line display
+        # Create a compact one-line display with enhanced status chips
         if game['status'] == 'in':
-            icon = "🔴"
+            status_chip = "🔴 **LIVE**"
         elif game['status'] == 'final':
-            icon = "✅"
+            status_chip = "✅ **FINAL**"
         else:
-            icon = "🕐"
+            status_chip = "🕐 **PRE**"
 
-        st.caption(
-            f"{icon} {game['away_team']} {game['away_score']} - "
+        st.markdown(
+            f"{status_chip} {game['away_team']} {game['away_score']} - "
             f"{game['home_score']} {game['home_team']}"
         )
