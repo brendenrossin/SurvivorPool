@@ -22,8 +22,9 @@ MOBILE_CONFIG = {
 
 # Mobile-optimized layout defaults
 MOBILE_LAYOUT_DEFAULTS = {
+    'template': 'plotly_white',  # Modern light template
     'margin': {'l': 20, 'r': 20, 't': 40, 'b': 40},  # Minimal margins for mobile
-    'font': {'size': 12},  # Readable font size on mobile
+    'font': {'family': 'Inter, system-ui', 'size': 12},  # Modern font matching CSS
     'showlegend': False,  # Legends take up too much space on mobile
     'hovermode': 'closest',  # Better touch targeting
     'dragmode': False,  # Disable drag to prevent scroll conflicts
@@ -36,15 +37,7 @@ CHART_CONFIGS = {
     'donut': {
         **MOBILE_LAYOUT_DEFAULTS,
         'height': 250,  # Compact for mobile
-        'showlegend': True,  # Exception: donut needs legend
-        'legend': {
-            'orientation': "h",  # Horizontal legend
-            'yanchor': "bottom",
-            'y': -0.1,
-            'xanchor': "center",
-            'x': 0.5,
-            'font': {'size': 10}
-        }
+        'showlegend': False,  # Remove redundant legend - annotations show the data
     },
 
     'bar_chart': {
@@ -52,11 +45,13 @@ CHART_CONFIGS = {
         'height': 300,
         'xaxis': {
             'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}}
+            'title': {'font': {'size': 11}},
+            'gridcolor': 'rgba(148,163,184,.25)'
         },
         'yaxis': {
             'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}}
+            'title': {'font': {'size': 11}},
+            'gridcolor': 'rgba(148,163,184,.25)'
         }
     },
 

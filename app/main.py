@@ -39,6 +39,7 @@ from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.chaos_meter import render_chaos_meter_widget
 from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
+from app.odds_helpers import get_underdog_spread_text
 
 # Load environment
 from dotenv import load_dotenv
@@ -50,17 +51,130 @@ team_data = load_team_data()
 
 def main():
 
+    # Load Inter font and modern CSS styling
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+
+    /* Force light modern theme */
+    .stApp {
+      background-color: #F8FAFC !important;
+      color: #0F172A !important;
+    }
+
+    html, body, [class*="css"]  {
+      font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif !important;
+      background-color: #F8FAFC !important;
+      color: #0F172A !important;
+    }
+
+    /* tighter layout + max width */
+    .main .block-container { padding-top: 1rem; padding-bottom: 3rem; max-width: 1100px; }
+
+    /* "card" look for sections */
+    .card {
+      background: #FFFFFF;
+      border: 1px solid rgba(148,163,184,.25);
+      border-radius: 16px;
+      padding: 16px 18px;
+      box-shadow: 0 6px 20px rgba(0,0,0,.08);
+      margin-bottom: 14px;
+    }
+
+    /* section headers */
+    h1, h2, h3 { letter-spacing: -0.01em; }
+    h1 { font-weight: 800; }
+    h2 { font-weight: 700; margin-top: .5rem; }
+
+    /* chips/badges */
+    .chip {
+      display:inline-flex; align-items:center; gap:.35rem;
+      padding: .22rem .6rem; border-radius: 999px;
+      font-size: .78rem; font-weight:600; border:1px solid rgba(148,163,184,.35);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    }
+    .chip.green { color:#10B981; border-color:rgba(16,185,129,.35); }
+    .chip.red   { color:#EF4444; border-color:rgba(239,68,68,.35); }
+    .chip.gray  { color:#94A3B8; }
+
+    /* live pulse dot */
+    .dot { width:8px;height:8px;border-radius:999px; background:#10B981; box-shadow:0 0 0 0 rgba(16,185,129,.7); animation:pulse 1.8s infinite; }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(16,185,129,.6)} 70%{box-shadow:0 0 0 14px rgba(16,185,129,0)} 100%{box-shadow:0 0 0 0 rgba(16,185,129,0)} }
+
+    /* nicer tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: .75rem; }
+    .stTabs [data-baseweb="tab"] { background:transparent; padding:.5rem .8rem; border-radius:10px; border:1px solid rgba(148,163,184,.25); }
+    .stTabs [aria-selected="true"] { border-color:#2563EB; }
+
+    /* plotly container spacing */
+    .js-plotly-plot, .stPlotlyChart { border-radius: 14px; overflow:hidden; }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Header
     st.title(f"Survivor {SEASON} — Live Dashboard")
 
-    # Last updated chip at top for transparency
+    # Subtle gradient header band
+    st.markdown("""
+    <div style="
+      height: 8px;
+      background: linear-gradient(90deg, #2563EB, #10B981 50%, #F59E0B);
+      border-radius: 999px;
+      opacity:.85; margin:-4px 0 10px 0;">
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Modern header with subtitle and chips
+    with st.container():
+        col_left, col_right = st.columns([0.72, 0.28])
+        with col_left:
+            st.caption("Live elimination tracking • NFL " + str(SEASON))
+        with col_right:
+            # Last update chip
+            try:
+                summary_preview = get_summary_data(SEASON)
+                last_updates = summary_preview.get("last_updates", {})
+                ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")
+                if ts:
+                    from datetime import timezone, timedelta
+                    pst_tz = timezone(timedelta(hours=-8))
+                    ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
+                    label = ts_pst.strftime("%m/%d %H:%M")
+                    st.markdown(f'<span class="chip gray">🕒 Last updated: {label} PST</span>', unsafe_allow_html=True)
+            except:
+                pass
+
+    # KPI Cards - modern at-a-glance stats
     try:
         summary_preview = get_summary_data(SEASON)
-        render_last_updated_chip(summary_preview.get("last_updates", {}))
-    except:
-        pass  # If data not available, skip the timestamp
+        with st.container():
+            st.markdown("### Key Stats")
+            k1, k2, k3 = st.columns(3)
 
-    # Live Scores Widget (top of page)
+            def kpi(title, value, subtitle, icon="🏈"):
+                st.markdown(f"""
+                <div class="card">
+                    <div style="font-size:.85rem; color:#94A3B8;">{icon} {title}</div>
+                    <div style="font-size:2rem; font-weight:800; margin:.1rem 0;">{value}</div>
+                    <div style="font-size:.85rem; color:#94A3B8;">{subtitle}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            entrants_remaining = summary_preview.get('entrants_remaining', 0)
+            entrants_total = summary_preview.get('entrants_total', 0)
+            eliminated_count = entrants_total - entrants_remaining
+
+            with k1:
+                kpi("Players Remaining", f"{entrants_remaining:,}", f"of {entrants_total:,} total entries")
+            with k2:
+                kpi("Eliminated Total", f"{eliminated_count:,}", "sent to graveyard", icon="💀")
+            with k3:
+                weeks_played = len(summary_preview.get('weeks', []))
+                kpi("Weeks Completed", f"{weeks_played:,}", "survival rounds", icon="📅")
+    except:
+        pass
+
+    # Live Scores Widget
     try:
         from api.database import SessionLocal
         from api.models import Game
@@ -75,17 +189,17 @@ def main():
 
             current_week = latest_week_result.week if latest_week_result else 1
 
-            # Render live scores from database only
+            # Render live scores widget (handles its own card-like styling with expander)
             render_live_scores_widget(db, SEASON, current_week)
         finally:
             try:
                 db.close()
             except:
                 pass
-
-        st.divider()
     except Exception as e:
         st.info("🏈 Live scores will appear once data is populated")
+
+    st.divider()
 
     # Load data
     try:
@@ -134,7 +248,7 @@ def main():
 
     # Pool Insights Section
     st.divider()
-    st.header("Pool Insights")
+    st.markdown("### 📊 Pool Insights")
 
     # Create tabs for Pool Insights features
     tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Elimination Tracker"])
@@ -363,46 +477,78 @@ def render_player_search():
 
 def render_meme_stats(meme_stats):
     """Render meme statistics section"""
-    st.subheader("Notable Picks")
+    st.markdown("### 🎯 Notable Picks")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        st.write("**Dumbest Picks (Season)**")
+        st.markdown("#### 🤡 Dumbest Picks (Season)")
         dumbest = meme_stats["dumbest_picks"]
 
         if dumbest:
-            for i, pick in enumerate(dumbest[:3], 1):
-                st.write(f"{i}. **{pick['team']} vs {pick['opponent']}** - Week {pick['week']}")
-                st.write(f"   Lost by {pick['margin']} ({pick['eliminated_count']} players eliminated)")
+            # Create table data
+            table_data = []
+            for pick in dumbest[:5]:  # Show up to 5
+                matchup = f"{pick['team']} vs {pick['opponent']}"
+                table_data.append({
+                    "Matchup": matchup,
+                    "Week": pick['week'],
+                    "Lost By": pick['margin'],
+                    "Eliminated": pick['eliminated_count']
+                })
+
+            # Display as table
+            df = pd.DataFrame(table_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("🤡 **No eliminations yet!**\n\nDumbest picks will appear once players start getting eliminated. The worse the loss, the higher the shame!")
 
     with col2:
-        st.write("**Big Balls (Risky Wins)**")
+        st.markdown("#### 💪 Big Balls (Risky Wins)")
         big_balls = meme_stats["big_balls_picks"]
 
         if big_balls:
-            for i, pick in enumerate(big_balls[:3], 1):
+            # Create table data
+            table_data = []
+            for pick in big_balls[:5]:  # Show up to 5
                 # Create the matchup display
                 if pick['road_win']:
                     matchup = f"{pick['team']} @ {pick['opponent']}"
                 else:
                     matchup = f"{pick['team']} vs {pick['opponent']}"
 
-                # Add dog emoji for underdog wins
-                underdog_emoji = " 🐕" if pick.get('was_underdog', False) else ""
+                # Add indicators
+                indicators = []
+                if pick.get('was_underdog', False):
+                    indicators.append("🐕")
+                if pick['road_win']:
+                    indicators.append("🛣️")
 
-                st.write(f"{i}. **{matchup}** ✅{underdog_emoji} - Week {pick['week']}")
+                indicator_str = " ".join(indicators) if indicators else ""
 
-                # Show spread info if available
-                spread_info = ""
+                # Create description
+                description = ""
                 if pick.get('point_spread') and pick.get('was_underdog'):
-                    spread_info = f" (underdog by {pick['point_spread']} pts)"
+                    underdog_text = get_underdog_spread_text(
+                        pick['team'],
+                        pick.get('favorite_team'),
+                        pick['point_spread']
+                    )
+                    if underdog_text:
+                        description = underdog_text.capitalize()
                 elif pick['road_win']:
-                    spread_info = " (road win)"
+                    description = "Road win"
 
-                st.write(f"   ({pick['big_balls_count']} pairs of huge nuts{spread_info})")
+                table_data.append({
+                    "Matchup": f"{matchup} {indicator_str}".strip(),
+                    "Week": pick['week'],
+                    "Type": description,
+                    "Players": pick['big_balls_count']
+                })
+
+            # Display as table
+            df = pd.DataFrame(table_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("💪 **No risky wins yet!**\n\nBig balls picks show road wins and underdog victories. The riskier the pick, the bigger the glory!")
 

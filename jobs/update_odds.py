@@ -99,16 +99,18 @@ class OddsUpdater:
             if game_key in odds_data:
                 odds = odds_data[game_key]
 
-                # Only update if we have new/different odds
+                # Only update if we have new/different odds (preserve historical data)
                 new_spread = odds.get("point_spread")
                 new_favorite = odds.get("favorite_team")
 
                 updated = False
-                if game.point_spread != new_spread:
+                # Only update spread if we have new data (don't overwrite with None)
+                if new_spread is not None and game.point_spread != new_spread:
                     game.point_spread = new_spread
                     updated = True
 
-                if game.favorite_team != new_favorite:
+                # Only update favorite if we have new data (don't overwrite with None)
+                if new_favorite is not None and game.favorite_team != new_favorite:
                     game.favorite_team = new_favorite
                     updated = True
 
