@@ -55,12 +55,15 @@ class ScoreUpdater:
             # Update games in database
             games_updated = self.upsert_games(db, games_with_odds)
 
-            # Update pick results
+            # Update pick results for current week
             picks_updated = self.update_pick_results(db, current_week)
+
+            # Also check and finalize any stuck games from previous weeks
+            stuck_games_fixed = self.finalize_stuck_games(db)
 
             db.commit()
 
-            message = f"Updated {games_updated} games, {picks_updated} pick results for week {current_week}"
+            message = f"Updated {games_updated} games, {picks_updated} pick results for week {current_week}, finalized {stuck_games_fixed} stuck games"
             self.update_job_meta(db, "update_scores", "success", message)
 
             print(f"Score update completed: {message}")
@@ -218,6 +221,65 @@ class ScoreUpdater:
                         updated_count += 1
 
         return updated_count
+
+    def finalize_stuck_games(self, db: Session) -> int:
+        """Check for games that should be marked as final but aren't"""
+        fixed_count = 0
+
+        # Find games that have scores but aren't marked as final
+        stuck_games = db.query(Game).filter(
+            Game.season == self.season,
+            Game.status != "final",
+            Game.home_score.isnot(None),
+            Game.away_score.isnot(None),
+            Game.kickoff.isnot(None)
+        ).all()
+
+        now = datetime.now(timezone.utc)
+
+        for game in stuck_games:
+            # Check if kickoff was more than 4 hours ago
+            game_kickoff = game.kickoff.replace(tzinfo=timezone.utc) if game.kickoff.tzinfo is None else game.kickoff
+            hours_since_kickoff = (now - game_kickoff).total_seconds() / 3600
+
+            if hours_since_kickoff > 4:
+                print(f"🔧 Finalizing stuck game: {game.away_team} @ {game.home_team} (Week {game.week}, {hours_since_kickoff:.1f}h ago)")
+
+                # Mark game as final
+                game.status = "final"
+                fixed_count += 1
+
+                # Determine winner if not already set
+                if game.winner_abbr is None:
+                    if game.home_score > game.away_score:
+                        game.winner_abbr = game.home_team
+                    elif game.away_score > game.home_score:
+                        game.winner_abbr = game.away_team
+                    # Ties leave winner_abbr as None
+
+                # Update any pick results for this game
+                picks = db.query(Pick).filter(
+                    Pick.season == game.season,
+                    Pick.week == game.week,
+                    ((Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team))
+                ).all()
+
+                for pick in picks:
+                    pick_result = db.query(PickResult).filter(
+                        PickResult.pick_id == pick.pick_id
+                    ).first()
+
+                    if pick_result and game.winner_abbr is not None:
+                        old_survived = pick_result.survived
+                        pick_result.survived = (pick.team_abbr == game.winner_abbr)
+
+                        if old_survived != pick_result.survived:
+                            print(f"  Updated pick for player {pick.player_id}: {old_survived} -> {pick_result.survived}")
+
+        if fixed_count > 0:
+            print(f"✅ Finalized {fixed_count} stuck games")
+
+        return fixed_count
 
     def update_job_meta(self, db: Session, job_name: str, status: str, message: str):
         """Update job metadata"""
