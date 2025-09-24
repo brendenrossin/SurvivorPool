@@ -184,7 +184,43 @@ def get_meme_stats(season: int) -> Dict:
                 g.favorite_team,
                 COUNT(DISTINCT pi.player_id) as big_balls_count,
                 CASE
-                    WHEN g.favorite_team IS NOT NULL AND g.favorite_team != pi.team_abbr THEN 1
+                    WHEN g.favorite_team IS NOT NULL AND
+                         -- Convert full team names to abbreviations for comparison
+                         CASE g.favorite_team
+                             WHEN 'Arizona Cardinals' THEN 'ARI'
+                             WHEN 'Atlanta Falcons' THEN 'ATL'
+                             WHEN 'Baltimore Ravens' THEN 'BAL'
+                             WHEN 'Buffalo Bills' THEN 'BUF'
+                             WHEN 'Carolina Panthers' THEN 'CAR'
+                             WHEN 'Chicago Bears' THEN 'CHI'
+                             WHEN 'Cincinnati Bengals' THEN 'CIN'
+                             WHEN 'Cleveland Browns' THEN 'CLE'
+                             WHEN 'Dallas Cowboys' THEN 'DAL'
+                             WHEN 'Denver Broncos' THEN 'DEN'
+                             WHEN 'Detroit Lions' THEN 'DET'
+                             WHEN 'Green Bay Packers' THEN 'GB'
+                             WHEN 'Houston Texans' THEN 'HOU'
+                             WHEN 'Indianapolis Colts' THEN 'IND'
+                             WHEN 'Jacksonville Jaguars' THEN 'JAX'
+                             WHEN 'Kansas City Chiefs' THEN 'KC'
+                             WHEN 'Las Vegas Raiders' THEN 'LV'
+                             WHEN 'Los Angeles Chargers' THEN 'LAC'
+                             WHEN 'Los Angeles Rams' THEN 'LAR'
+                             WHEN 'Miami Dolphins' THEN 'MIA'
+                             WHEN 'Minnesota Vikings' THEN 'MIN'
+                             WHEN 'New England Patriots' THEN 'NE'
+                             WHEN 'New Orleans Saints' THEN 'NO'
+                             WHEN 'New York Giants' THEN 'NYG'
+                             WHEN 'New York Jets' THEN 'NYJ'
+                             WHEN 'Philadelphia Eagles' THEN 'PHI'
+                             WHEN 'Pittsburgh Steelers' THEN 'PIT'
+                             WHEN 'San Francisco 49ers' THEN 'SF'
+                             WHEN 'Seattle Seahawks' THEN 'SEA'
+                             WHEN 'Tampa Bay Buccaneers' THEN 'TB'
+                             WHEN 'Tennessee Titans' THEN 'TEN'
+                             WHEN 'Washington Commanders' THEN 'WAS'
+                             ELSE g.favorite_team
+                         END != pi.team_abbr THEN 1
                     ELSE 0
                 END as was_underdog
             FROM picks pi
@@ -202,8 +238,43 @@ def get_meme_stats(season: int) -> Dict:
                     -- Original criteria: away team wins (road wins)
                     (pi.team_abbr = g.away_team AND g.away_score > g.home_score)
                     OR
-                    -- New criteria: underdog wins (when we have spread data)
-                    (g.favorite_team IS NOT NULL AND g.favorite_team != pi.team_abbr)
+                    -- New criteria: underdog wins (when we have spread data and team actually won)
+                    (g.favorite_team IS NOT NULL AND
+                     CASE g.favorite_team
+                         WHEN 'Arizona Cardinals' THEN 'ARI'
+                         WHEN 'Atlanta Falcons' THEN 'ATL'
+                         WHEN 'Baltimore Ravens' THEN 'BAL'
+                         WHEN 'Buffalo Bills' THEN 'BUF'
+                         WHEN 'Carolina Panthers' THEN 'CAR'
+                         WHEN 'Chicago Bears' THEN 'CHI'
+                         WHEN 'Cincinnati Bengals' THEN 'CIN'
+                         WHEN 'Cleveland Browns' THEN 'CLE'
+                         WHEN 'Dallas Cowboys' THEN 'DAL'
+                         WHEN 'Denver Broncos' THEN 'DEN'
+                         WHEN 'Detroit Lions' THEN 'DET'
+                         WHEN 'Green Bay Packers' THEN 'GB'
+                         WHEN 'Houston Texans' THEN 'HOU'
+                         WHEN 'Indianapolis Colts' THEN 'IND'
+                         WHEN 'Jacksonville Jaguars' THEN 'JAX'
+                         WHEN 'Kansas City Chiefs' THEN 'KC'
+                         WHEN 'Las Vegas Raiders' THEN 'LV'
+                         WHEN 'Los Angeles Chargers' THEN 'LAC'
+                         WHEN 'Los Angeles Rams' THEN 'LAR'
+                         WHEN 'Miami Dolphins' THEN 'MIA'
+                         WHEN 'Minnesota Vikings' THEN 'MIN'
+                         WHEN 'New England Patriots' THEN 'NE'
+                         WHEN 'New Orleans Saints' THEN 'NO'
+                         WHEN 'New York Giants' THEN 'NYG'
+                         WHEN 'New York Jets' THEN 'NYJ'
+                         WHEN 'Philadelphia Eagles' THEN 'PHI'
+                         WHEN 'Pittsburgh Steelers' THEN 'PIT'
+                         WHEN 'San Francisco 49ers' THEN 'SF'
+                         WHEN 'Seattle Seahawks' THEN 'SEA'
+                         WHEN 'Tampa Bay Buccaneers' THEN 'TB'
+                         WHEN 'Tennessee Titans' THEN 'TEN'
+                         WHEN 'Washington Commanders' THEN 'WAS'
+                         ELSE g.favorite_team
+                     END != pi.team_abbr AND pi.team_abbr = g.winner_abbr)
                 )
             GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score, g.point_spread, g.favorite_team
             ORDER BY was_underdog DESC, pi.week DESC
@@ -230,6 +301,7 @@ def get_meme_stats(season: int) -> Dict:
                 "road_win": road_win,
                 "was_underdog": was_underdog,
                 "point_spread": row.point_spread,
+                "favorite_team": row.favorite_team,
                 "big_balls_count": row.big_balls_count
             })
 

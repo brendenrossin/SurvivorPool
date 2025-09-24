@@ -10,6 +10,7 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any
 import os
+from app.odds_helpers import format_pregame_line
 
 def get_survivor_counts(db, game) -> Dict[str, int]:
     """Calculate survivor counts for a final game"""
@@ -54,13 +55,12 @@ def create_game_display(game, home_pickers: List[str], away_pickers: List[str], 
             status_display = "🕐 TBD"
 
         # Show spread if available, otherwise "vs"
-        if game.point_spread and game.favorite_team:
-            if game.favorite_team == game.home_team:
-                score_display = f"{game.home_team} -{game.point_spread}"  # Home favored
-            else:
-                score_display = f"{game.favorite_team} -{game.point_spread}"  # Away favored
-        else:
-            score_display = "vs"
+        score_display = format_pregame_line(
+            game.home_team,
+            game.away_team,
+            game.favorite_team,
+            game.point_spread
+        )
     elif game.status == 'in':
         status_display = "🔴 LIVE"
         score_display = f"{game.home_score} - {game.away_score}"
