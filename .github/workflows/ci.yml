@@ -29,7 +29,12 @@ jobs:
         python -m py_compile jobs/*.py
         python -m py_compile api/*.py
 
-    - name: Check imports
+    - name: Check imports (with mock environment)
+      env:
+        DATABASE_URL: "sqlite:///:memory:"  # Mock database for CI
+        NFL_SEASON: "2025"
+        GOOGLE_SHEETS_SPREADSHEET_ID: "mock_spreadsheet_id"
+        GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "bW9ja19jcmVkZW50aWFscw=="  # base64 "mock_credentials"
       run: |
         python -c "from app.main import main; print('✅ Main app imports successfully')"
         python -c "from jobs.update_scores import ScoreUpdater; print('✅ Score updater imports successfully')"
