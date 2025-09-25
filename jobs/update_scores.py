@@ -41,7 +41,7 @@ class ScoreUpdater:
             current_week = self.score_provider.get_current_week(self.season)
             print(f"Updating scores for Season {self.season}, Week {current_week}")
 
-            # Fetch games and scores
+            # Fetch games and scores for current week
             games = self.score_provider.get_schedule_and_scores(self.season, current_week)
 
             # Optionally fetch betting odds (for backwards compatibility or manual runs)
@@ -57,6 +57,18 @@ class ScoreUpdater:
 
             # Update pick results for current week
             picks_updated = self.update_pick_results(db, current_week)
+
+            # IMPORTANT: Also process any previous weeks that have picks but no results
+            # This ensures we calculate eliminations for completed games
+            all_weeks = db.query(Pick.week).filter(Pick.season == self.season).distinct().all()
+            previous_weeks = [w[0] for w in all_weeks if w[0] < current_week]
+
+            for week in previous_weeks:
+                print(f"🔄 Backfilling pick results for Week {week}...")
+                week_picks_updated = self.update_pick_results(db, week)
+                picks_updated += week_picks_updated
+                if week_picks_updated > 0:
+                    print(f"  ✅ Updated {week_picks_updated} pick results for Week {week}")
 
             # Also check and finalize any stuck games from previous weeks
             stuck_games_fixed = self.finalize_stuck_games(db)
