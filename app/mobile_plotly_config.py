@@ -24,7 +24,7 @@ MOBILE_CONFIG = {
 MOBILE_LAYOUT_DEFAULTS = {
     'template': 'plotly_white',  # Modern light template
     'margin': {'l': 20, 'r': 20, 't': 40, 'b': 40},  # Minimal margins for mobile
-    'font': {'family': 'Inter, system-ui', 'size': 12},  # Modern font matching CSS
+    'font': {'family': 'Inter, system-ui', 'size': 12, 'color': '#0F172A'},  # Modern font matching CSS with dark color
     'showlegend': False,  # Legends take up too much space on mobile
     'hovermode': 'closest',  # Better touch targeting
     'dragmode': False,  # Disable drag to prevent scroll conflicts
@@ -44,13 +44,13 @@ CHART_CONFIGS = {
         **MOBILE_LAYOUT_DEFAULTS,
         'height': 300,
         'xaxis': {
-            'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}},
+            'tickfont': {'size': 10, 'color': '#0F172A'},
+            'title': {'font': {'size': 11, 'color': '#0F172A'}},
             'gridcolor': 'rgba(148,163,184,.25)'
         },
         'yaxis': {
-            'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}},
+            'tickfont': {'size': 10, 'color': '#0F172A'},
+            'title': {'font': {'size': 11, 'color': '#0F172A'}},
             'gridcolor': 'rgba(148,163,184,.25)'
         }
     },
@@ -59,12 +59,12 @@ CHART_CONFIGS = {
         **MOBILE_LAYOUT_DEFAULTS,
         'height': 300,
         'xaxis': {
-            'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}}
+            'tickfont': {'size': 10, 'color': '#0F172A'},
+            'title': {'font': {'size': 11, 'color': '#0F172A'}}
         },
         'yaxis': {
-            'tickfont': {'size': 10},
-            'title': {'font': {'size': 11}}
+            'tickfont': {'size': 10, 'color': '#0F172A'},
+            'title': {'font': {'size': 11, 'color': '#0F172A'}}
         }
     },
 
@@ -78,12 +78,12 @@ CHART_CONFIGS = {
         **MOBILE_LAYOUT_DEFAULTS,
         'height': 250,  # Compact heatmap
         'xaxis': {
-            'tickfont': {'size': 9},
-            'title': {'font': {'size': 10}}
+            'tickfont': {'size': 9, 'color': '#0F172A'},
+            'title': {'font': {'size': 10, 'color': '#0F172A'}}
         },
         'yaxis': {
-            'tickfont': {'size': 9},
-            'title': {'font': {'size': 10}}
+            'tickfont': {'size': 9, 'color': '#0F172A'},
+            'title': {'font': {'size': 10, 'color': '#0F172A'}}
         }
     }
 }

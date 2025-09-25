@@ -1,4 +1,4 @@
-# Dockerfile for Railway deployment - FORCE REBUILD
+# Dockerfile for Railway deployment - BUILD_CACHE_BUST_v2
 FROM python:3.11-slim
 
 # Set working directory
@@ -19,11 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create logs directory
-RUN mkdir -p logs
-
-# Make start script executable
-RUN chmod +x start.sh
+# Create logs directory and make start script executable in one layer
+RUN mkdir -p logs && chmod +x start.sh
 
 # Expose port (Railway typically uses port 8080)
 EXPOSE 8080

@@ -14,3 +14,16 @@ __pycache__/
 *.pyd
 .Python
 .pytest_cache/
+
+# Virtual environments (CRITICAL - this was missing!)
+.venv/
+venv/
+env/
+
+# Node modules if any
+node_modules/
+
+# Large build artifacts
+*.egg-info/
+dist/
+build/
