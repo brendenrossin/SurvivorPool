@@ -68,6 +68,21 @@ def main():
       color: #0F172A !important;
     }
 
+    /* Aggressive text color overrides to fix Railway visibility issues */
+    .stApp > div, .main, .block-container, p, span, div, h1, h2, h3, h4, h5, h6 {
+      color: #0F172A !important;
+    }
+
+    /* Fix specific Streamlit components */
+    .stMarkdown, .stText, .stTitle, .stSubheader, .stHeader, .stCaption {
+      color: #0F172A !important;
+    }
+
+    /* Fix metric labels and values */
+    [data-testid="metric-container"] > div, [data-testid="metric-container"] label, [data-testid="metric-container"] div {
+      color: #0F172A !important;
+    }
+
     /* tighter layout + max width */
     .main .block-container { padding-top: 1rem; padding-bottom: 3rem; max-width: 1100px; }
 

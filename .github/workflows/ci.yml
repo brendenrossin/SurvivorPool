@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, staging ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run basic syntax check
+      run: |
+        python -m py_compile app/*.py
+        python -m py_compile jobs/*.py
+        python -m py_compile api/*.py
+
+    - name: Check imports (with mock environment)
+      env:
+        DATABASE_URL: "sqlite:///:memory:"  # Mock database for CI
+        NFL_SEASON: "2025"
+        GOOGLE_SHEETS_SPREADSHEET_ID: "mock_spreadsheet_id"
+        GOOGLE_SERVICE_ACCOUNT_JSON_BASE64: "bW9ja19jcmVkZW50aWFscw=="  # base64 "mock_credentials"
+      run: |
+        python -c "from app.main import main; print('✅ Main app imports successfully')"
+        python -c "from jobs.update_scores import ScoreUpdater; print('✅ Score updater imports successfully')"
+
+    - name: Validate config files
+      run: |
+        python -c "import json; json.load(open('db/seed_team_map.json')); print('✅ Team data valid')"
+        python -c "import configparser; c=configparser.ConfigParser(); c.read('.streamlit/config.toml'); print('✅ Streamlit config valid')"
+
+  deploy-staging:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+
+    steps:
+    - name: Deploy to Railway Staging
+      run: |
+        echo "✅ Staging deployment would trigger here"
+        echo "Railway will auto-deploy from staging branch"
+
+  deploy-production:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Deploy to Railway Production
+      run: |
+        echo "✅ Production deployment would trigger here"
+        echo "Railway will auto-deploy from main branch"
