@@ -36,13 +36,13 @@ def parse_picks_data(picks_data):
             if name not in players_data:
                 players_data[name] = {}
 
-            # Parse weekly picks (assuming Week 1, Week 2, Week 3 columns)
-            for week_num in [1, 2, 3]:
-                week_col = f'Week {week_num}'
-                if week_col in parsed:
-                    team = parsed[week_col].strip().upper()
-                    if team and team != '':
-                        players_data[name][week_num] = team
+            # Parse weekly picks dynamically - find all Week X columns
+            week_columns = [key for key in parsed.keys() if key.startswith('Week ') and key.replace('Week ', '').isdigit()]
+            for week_col in week_columns:
+                week_num = int(week_col.replace('Week ', ''))
+                team = parsed[week_col].strip().upper()
+                if team and team != '':
+                    players_data[name][week_num] = team
 
         except Exception as e:
             print(f"⚠️ Error parsing row {record.get('row_number', '?')}: {e}")
@@ -60,13 +60,21 @@ def ingest_players_and_picks(players_data):
 
         season = int(os.getenv('NFL_SEASON', 2025))
 
-        # Clear existing data to avoid conflicts with mock data
-        print("🧹 Clearing existing pick and player data...")
-        db.execute(text("DELETE FROM pick_results WHERE pick_id IN (SELECT pick_id FROM picks WHERE season = :season)"), {"season": season})
+        # Clear existing picks and players, but preserve calculated pick_results
+        print("🧹 Clearing existing pick and player data (preserving calculated results)...")
+        # First, save pick_results that have been calculated by score updates
+        db.execute(text("""
+            CREATE TEMPORARY TABLE temp_pick_results AS
+            SELECT pr.* FROM pick_results pr
+            JOIN picks p ON pr.pick_id = p.pick_id
+            WHERE p.season = :season AND pr.game_id IS NOT NULL
+        """), {"season": season})
+
+        # Delete picks and players (this cascades to pick_results)
         db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
         db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
         db.commit()
-        print("✅ Existing data cleared")
+        print("✅ Existing data cleared (calculated results preserved)")
 
         players_created = 0
         picks_created = 0
@@ -109,6 +117,36 @@ def ingest_players_and_picks(players_data):
                     )
                     db.add(new_pick)
                     picks_created += 1
+
+        # Restore calculated pick_results by matching player names and weeks
+        print("🔄 Restoring calculated elimination results...")
+        try:
+            restored_results = db.execute(text("""
+                INSERT INTO pick_results (pick_id, game_id, survived, is_locked, is_valid)
+                SELECT
+                    new_p.pick_id,
+                    temp_pr.game_id,
+                    temp_pr.survived,
+                    temp_pr.is_locked,
+                    temp_pr.is_valid
+                FROM temp_pick_results temp_pr
+                JOIN picks old_p ON temp_pr.pick_id = old_p.pick_id
+                JOIN players old_pl ON old_p.player_id = old_pl.player_id
+                JOIN players new_pl ON old_pl.display_name = new_pl.display_name
+                JOIN picks new_p ON new_pl.player_id = new_p.player_id
+                    AND new_p.week = old_p.week
+                    AND new_p.season = old_p.season
+                WHERE temp_pr.game_id IS NOT NULL
+            """))
+            print(f"   ✅ Restored {restored_results.rowcount} calculated elimination results")
+        except Exception as e:
+            print(f"   ⚠️ Failed to restore results: {e}")
+
+        # Clean up temporary table
+        try:
+            db.execute(text("DROP TABLE temp_pick_results"))
+        except:
+            pass  # Table might not exist
 
         db.commit()
 

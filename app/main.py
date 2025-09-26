@@ -374,6 +374,7 @@ def render_weekly_picks_chart(summary):
 
             chart_data.append({
                 "Week": f"Week {week}",
+                "Week_Num": week,  # Keep numeric week for proper sorting
                 "Team": team,
                 "Count": count
             })
@@ -384,11 +385,25 @@ def render_weekly_picks_chart(summary):
 
     df = pd.DataFrame(chart_data)
 
-    # Sort data to ensure largest stack components are on bottom
-    # Group by Week and sort by Count within each week (largest first = bottom of stack)
-    df_sorted = df.sort_values(['Week', 'Count'], ascending=[True, False])
+    # Get overall team order by total count (largest first for bottom stacking)
+    team_totals = df.groupby('Team')['Count'].sum().sort_values(ascending=False)
+    team_order = team_totals.index.tolist()
 
-    # Create stacked bar chart with consistent color mapping
+    # CRITICAL: For proper stacking order, we need to sort by team order WITHIN each week
+    # Plotly stacks in the order data appears in DataFrame, not category_orders
+    df_for_stacking = []
+    for week_num in sorted(df['Week_Num'].unique()):
+        week_data = df[df['Week_Num'] == week_num]
+
+        # Sort this week's data by team_order (largest total teams first = bottom of stack)
+        for team in team_order:
+            team_row = week_data[week_data['Team'] == team]
+            if not team_row.empty:
+                df_for_stacking.append(team_row.iloc[0])
+
+    df_sorted = pd.DataFrame(df_for_stacking)
+
+    # Create stacked bar chart with proper ordering
     fig = px.bar(
         df_sorted,
         x="Week",
@@ -396,27 +411,42 @@ def render_weekly_picks_chart(summary):
         color="Team",
         color_discrete_map=color_map,  # Use centralized color map
         title="📊 Team Picks by Week",
-        category_orders={"Team": df_sorted.sort_values('Count', ascending=False)['Team'].unique()}
+        category_orders={
+            "Week": [f"Week {i}" for i in sorted(df['Week_Num'].unique())],  # Force numeric week order
+            "Team": team_order  # Largest totals first (bottom of stack)
+        }
     )
 
     # Calculate proper annotation positions for stacked bars - mobile optimized
     week_annotations = []
-    for week in df_sorted["Week"].unique():
-        # Get data for this week and sort by count descending (largest first = bottom of stack)
-        week_data = df_sorted[df_sorted["Week"] == week].sort_values('Count', ascending=False)
+    # Process weeks in proper numeric order
+    for week_num in sorted(df['Week_Num'].unique()):
+        week_label = f"Week {week_num}"
+
+        # Get data for this week sorted by team order (same as stacking order)
+        week_data = df_sorted[df_sorted["Week"] == week_label]
+
+        # Sort by the same team order used in the chart (largest totals first = bottom)
+        week_data_ordered = []
+        for team in team_order:
+            team_row = week_data[week_data["Team"] == team]
+            if not team_row.empty:
+                week_data_ordered.append(team_row.iloc[0])
+
         cumulative_y = 0
 
-        # Get top-3 teams for annotation (mobile optimization)
-        top_3_teams = set(week_data.head(3)["Team"].tolist())
+        # Get top-3 teams by count for this specific week (for mobile optimization)
+        week_teams_by_count = sorted(week_data_ordered, key=lambda x: x["Count"], reverse=True)
+        top_3_teams = set([team["Team"] for team in week_teams_by_count[:3]])
 
-        for _, row in week_data.iterrows():
+        for row in week_data_ordered:
             # Only annotate top-3 teams with minimum threshold
             if row["Team"] in top_3_teams and row["Count"] >= 5:
                 # Position text at center of this team's bar segment
                 y_center = cumulative_y + (row["Count"] / 2)
 
                 week_annotations.append({
-                    "x": row["Week"],
+                    "x": week_label,
                     "y": y_center,
                     "text": row["Team"]
                 })
