@@ -36,13 +36,13 @@ def parse_picks_data(picks_data):
             if name not in players_data:
                 players_data[name] = {}
 
-            # Parse weekly picks (assuming Week 1, Week 2, Week 3, Week 4 columns)
-            for week_num in [1, 2, 3, 4]:
-                week_col = f'Week {week_num}'
-                if week_col in parsed:
-                    team = parsed[week_col].strip().upper()
-                    if team and team != '':
-                        players_data[name][week_num] = team
+            # Parse weekly picks dynamically - find all Week X columns
+            week_columns = [key for key in parsed.keys() if key.startswith('Week ') and key.replace('Week ', '').isdigit()]
+            for week_col in week_columns:
+                week_num = int(week_col.replace('Week ', ''))
+                team = parsed[week_col].strip().upper()
+                if team and team != '':
+                    players_data[name][week_num] = team
 
         except Exception as e:
             print(f"⚠️ Error parsing row {record.get('row_number', '?')}: {e}")
