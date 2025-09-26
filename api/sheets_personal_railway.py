@@ -15,27 +15,12 @@ def get_railway_personal_sheets_client():
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        # Get OAuth credentials from Railway environment variables
-        oauth_token = os.getenv('GOOGLE_OAUTH_TOKEN_JSON')
+        # Use the new OAuth manager with auto-refresh
+        from api.oauth_manager import get_oauth_credentials
 
-        if not oauth_token:
-            print("❌ GOOGLE_OAUTH_TOKEN_JSON environment variable not set")
+        creds = get_oauth_credentials()
+        if not creds:
             return None
-
-        # Parse the token JSON
-        token_data = json.loads(oauth_token)
-
-        # Create credentials object
-        creds = Credentials.from_authorized_user_info(token_data)
-
-        # Refresh if needed
-        if creds.expired and creds.refresh_token:
-            print("🔄 Refreshing OAuth token...")
-            creds.refresh(Request())
-
-            # Update environment variable with refreshed token (for next time)
-            updated_token = creds.to_json()
-            print("💾 Token refreshed successfully")
 
         # Build the service
         service = build('sheets', 'v4', credentials=creds)
