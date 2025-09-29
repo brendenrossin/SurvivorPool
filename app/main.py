@@ -468,6 +468,108 @@ def render_weekly_picks_chart(summary):
     # Use mobile optimization
     render_mobile_chart(fig, 'bar_chart')
 
+    # Add current week picks table
+    try:
+        from api.database import SessionLocal
+        from api.models import Game
+
+        # Get current week from database
+        db = SessionLocal()
+        try:
+            latest_week_result = db.query(Game.week).filter(
+                Game.season == SEASON
+            ).order_by(Game.week.desc()).first()
+            current_week = latest_week_result.week if latest_week_result else 1
+        finally:
+            try:
+                db.close()
+            except:
+                pass
+
+        # Find current week's data in summary
+        current_week_data = None
+        for week_data in summary["weeks"]:
+            if week_data["week"] == current_week:
+                current_week_data = week_data
+                break
+
+        st.subheader(f"📋 Week {current_week} Picks Breakdown")
+
+        if current_week_data and current_week_data["teams"]:
+            # Get team game status for styling
+            try:
+                from api.models import Game, Pick, PickResult
+                from sqlalchemy import text
+                losing_teams = set()  # Teams that lost, tied, or caused eliminations (💀)
+                winning_teams = set()  # Teams that won their games (✅)
+                pending_teams = set()  # Teams with games not started yet (🕐)
+
+                # Find all teams with games in current week
+                week_games = db.query(Game).filter(
+                    Game.week == current_week,
+                    Game.season == SEASON
+                ).all()
+
+                for game in week_games:
+                    if game.status == 'final' and game.home_score is not None and game.away_score is not None:
+                        # CRITICAL: Handle ties - both teams are considered "losing" for survivor purposes
+                        if game.home_score == game.away_score:
+                            # TIE GAME - both teams cause eliminations!
+                            losing_teams.add(game.home_team)
+                            losing_teams.add(game.away_team)
+                        elif game.home_score > game.away_score:
+                            # Home team won
+                            winning_teams.add(game.home_team)
+                            losing_teams.add(game.away_team)
+                        else:
+                            # Away team won
+                            winning_teams.add(game.away_team)
+                            losing_teams.add(game.home_team)
+                    elif game.status in ['pre', 'scheduled']:
+                        # Games not started yet
+                        pending_teams.add(game.home_team)
+                        pending_teams.add(game.away_team)
+
+                # NOTE: We only use game results, not database eliminations
+                # This ensures emojis reflect current game status, not stale elimination data
+
+            except Exception as e:
+                losing_teams = set()
+                winning_teams = set()
+                pending_teams = set()
+
+            # Create DataFrame for the table with emoji indicators
+            table_data = []
+            for team_item in current_week_data["teams"]:
+                team = team_item["team"]
+
+                # Determine emoji based on game status
+                if team in losing_teams:
+                    team_display = f"💀 {team}"  # Lost, tied, or eliminated
+                elif team in winning_teams:
+                    team_display = f"✅ {team}"  # Won their game
+                elif team in pending_teams:
+                    team_display = f"🕐 {team}"  # Game not started
+                else:
+                    team_display = team  # Default (no game data)
+
+                table_data.append({
+                    "Team Picked": team_display,
+                    "Number of Survivors": team_item["count"]
+                })
+
+            # Sort by count descending
+            table_data = sorted(table_data, key=lambda x: x["Number of Survivors"], reverse=True)
+
+            # Display table (no background styling, just emojis)
+            df_table = pd.DataFrame(table_data)
+            st.dataframe(df_table, use_container_width=True, hide_index=True)
+        else:
+            st.info("📝 No picks uploaded to Google Sheet Tracker yet")
+
+    except Exception as e:
+        st.info("📝 No picks uploaded to Google Sheet Tracker yet")
+
 def render_player_search():
     """Render player search section"""
     st.subheader("Find a Survivor")
