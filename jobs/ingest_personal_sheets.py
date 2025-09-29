@@ -60,21 +60,14 @@ def ingest_players_and_picks(players_data):
 
         season = int(os.getenv('NFL_SEASON', 2025))
 
-        # Clear existing picks and players, but preserve calculated pick_results
-        print("🧹 Clearing existing pick and player data (preserving calculated results)...")
-        # First, save pick_results that have been calculated by score updates
-        db.execute(text("""
-            CREATE TEMPORARY TABLE temp_pick_results AS
-            SELECT pr.* FROM pick_results pr
-            JOIN picks p ON pr.pick_id = p.pick_id
-            WHERE p.season = :season AND pr.game_id IS NOT NULL
-        """), {"season": season})
+        # Clear existing picks and players - we'll recalculate pick_results from current games
+        print("🧹 Clearing existing pick and player data...")
 
         # Delete picks and players (this cascades to pick_results)
         db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
         db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
         db.commit()
-        print("✅ Existing data cleared (calculated results preserved)")
+        print("✅ Existing data cleared")
 
         players_created = 0
         picks_created = 0
@@ -118,35 +111,31 @@ def ingest_players_and_picks(players_data):
                     db.add(new_pick)
                     picks_created += 1
 
-        # Restore calculated pick_results by matching player names and weeks
-        print("🔄 Restoring calculated elimination results...")
+        # Re-calculate all pick_results from current game data (ensures latest scores)
+        print("🔄 Re-calculating elimination results from current game data...")
         try:
-            restored_results = db.execute(text("""
-                INSERT INTO pick_results (pick_id, game_id, survived, is_locked, is_valid)
-                SELECT
-                    new_p.pick_id,
-                    temp_pr.game_id,
-                    temp_pr.survived,
-                    temp_pr.is_locked,
-                    temp_pr.is_valid
-                FROM temp_pick_results temp_pr
-                JOIN picks old_p ON temp_pr.pick_id = old_p.pick_id
-                JOIN players old_pl ON old_p.player_id = old_pl.player_id
-                JOIN players new_pl ON old_pl.display_name = new_pl.display_name
-                JOIN picks new_p ON new_pl.player_id = new_p.player_id
-                    AND new_p.week = old_p.week
-                    AND new_p.season = old_p.season
-                WHERE temp_pr.game_id IS NOT NULL
-            """))
-            print(f"   ✅ Restored {restored_results.rowcount} calculated elimination results")
-        except Exception as e:
-            print(f"   ⚠️ Failed to restore results: {e}")
+            # Use the same logic as update_scores.py to ensure consistency
+            from jobs.update_scores import ScoreUpdater
 
-        # Clean up temporary table
-        try:
-            db.execute(text("DROP TABLE temp_pick_results"))
-        except:
-            pass  # Table might not exist
+            updater = ScoreUpdater()
+
+            # Get all weeks that have picks in the database
+            weeks_with_picks = db.execute(text("""
+                SELECT DISTINCT week FROM picks WHERE season = :season ORDER BY week
+            """), {"season": season}).fetchall()
+
+            total_results = 0
+            for (week,) in weeks_with_picks:
+                print(f"   🔄 Processing elimination results for Week {week}...")
+                week_results = updater.update_pick_results(db, week)
+                total_results += week_results
+                print(f"      ✅ Created/updated {week_results} pick results")
+
+            print(f"   ✅ Re-calculated {total_results} elimination results from current games")
+        except Exception as e:
+            print(f"   ⚠️ Failed to re-calculate results: {e}")
+            import traceback
+            traceback.print_exc()
 
         db.commit()
 
