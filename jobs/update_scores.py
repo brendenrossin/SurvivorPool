@@ -225,9 +225,16 @@ class ScoreUpdater:
                     updated_count += 1
 
                 # Update pick survival status
-                if game.winner_abbr is not None:
+                # CRITICAL: For completed games, survival requires WINNING (not tying)
+                if game.home_score is not None and game.away_score is not None:
                     old_survived = pick_result.survived
-                    pick_result.survived = (pick.team_abbr == game.winner_abbr)
+
+                    if game.winner_abbr is not None:
+                        # Normal win/loss - survive only if picked the winner
+                        pick_result.survived = (pick.team_abbr == game.winner_abbr)
+                    else:
+                        # TIE GAME - both teams cause eliminations (nobody survives a tie)
+                        pick_result.survived = False
 
                     if old_survived != pick_result.survived:
                         updated_count += 1
@@ -281,9 +288,15 @@ class ScoreUpdater:
                         PickResult.pick_id == pick.pick_id
                     ).first()
 
-                    if pick_result and game.winner_abbr is not None:
+                    if pick_result:
                         old_survived = pick_result.survived
-                        pick_result.survived = (pick.team_abbr == game.winner_abbr)
+
+                        if game.winner_abbr is not None:
+                            # Normal win/loss - survive only if picked the winner
+                            pick_result.survived = (pick.team_abbr == game.winner_abbr)
+                        else:
+                            # TIE GAME - both teams cause eliminations (nobody survives a tie)
+                            pick_result.survived = False
 
                         if old_survived != pick_result.survived:
                             print(f"  Updated pick for player {pick.player_id}: {old_survived} -> {pick_result.survived}")
