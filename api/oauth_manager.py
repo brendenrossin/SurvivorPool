@@ -120,10 +120,10 @@ class OAuthTokenManager:
         try:
             refreshed_token = self.get_updated_token_for_railway()
 
-            with open('.railway_oauth_token_refreshed.txt', 'w') as f:
+            with open('.credentials/.railway_oauth_token_refreshed.txt', 'w') as f:
                 f.write(refreshed_token)
 
-            print("💾 Refreshed token saved to .railway_oauth_token_refreshed.txt")
+            print("💾 Refreshed token saved to .credentials/.railway_oauth_token_refreshed.txt")
             print("🔄 Update Railway GOOGLE_OAUTH_TOKEN_JSON with this new value")
 
         except Exception as e:
