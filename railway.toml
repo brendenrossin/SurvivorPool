@@ -4,9 +4,10 @@
 # ENVIRONMENT-SPECIFIC STARTUP:
 # - Production/Staging: Uses start.sh (default)
 # - Dev: Set RAILWAY_START_SCRIPT=start_dev.sh in Railway env vars
+# - Uses start_railway.sh wrapper to select correct script
 
 [build]
 builder = "nixpacks"
 
 [deploy]
-startCommand = "bash ${RAILWAY_START_SCRIPT:-start.sh}"
+startCommand = "bash start_railway.sh"
