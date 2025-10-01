@@ -154,7 +154,7 @@ def main():
                     from datetime import timezone, timedelta
                     pst_tz = timezone(timedelta(hours=-8))
                     ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
-                    label = ts_pst.strftime("%m/%d %H:%M")
+                    label = ts_pst.strftime("%m/%d %I:%M %p")
                     st.markdown(f'<span class="chip gray">🕒 Last updated: {label} PST</span>', unsafe_allow_html=True)
             except:
                 pass
@@ -721,8 +721,8 @@ def render_last_updated_chip(last_updates):
         # Convert UTC to PST (UTC-8)
         pst_tz = timezone(timedelta(hours=-8))
         ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
-        label = ts_pst.strftime("%m/%d %H:%M")
-        st.caption(f"🕒 Last updated: {label} (PST)")
+        label = ts_pst.strftime("%m/%d %I:%M %p")
+        st.caption(f"🕒 Last updated: {label} PST")
 
 def render_footer(last_updates):
     """Render footer with update information"""
@@ -737,12 +737,12 @@ def render_footer(last_updates):
         st.caption("**Data Sources:**")
         if "ingest_sheet" in last_updates and last_updates["ingest_sheet"]:
             sheet_time_pst = last_updates["ingest_sheet"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-            sheet_time = sheet_time_pst.strftime("%m/%d %H:%M")
+            sheet_time = sheet_time_pst.strftime("%m/%d %I:%M %p")
             st.caption(f"📊 Picks: {sheet_time} PST")
 
         if "update_scores" in last_updates and last_updates["update_scores"]:
             scores_time_pst = last_updates["update_scores"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-            scores_time = scores_time_pst.strftime("%m/%d %H:%M")
+            scores_time = scores_time_pst.strftime("%m/%d %I:%M %p")
             st.caption(f"🏈 Scores: {scores_time} PST")
 
     with col2:
