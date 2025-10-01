@@ -111,29 +111,24 @@ def ingest_players_and_picks(players_data):
                     db.add(new_pick)
                     picks_created += 1
 
-        # Re-calculate all pick_results from current game data (ensures latest scores)
+        # Re-calculate ALL elimination results using shared helper
+        # This ensures consistency with app startup and cron jobs
         print("🔄 Re-calculating elimination results from current game data...")
         try:
-            # Use the same logic as update_scores.py to ensure consistency
+            # Use SHARED HELPER to ensure consistency
             from jobs.update_scores import ScoreUpdater
 
             updater = ScoreUpdater()
 
-            # Get all weeks that have picks in the database
-            weeks_with_picks = db.execute(text("""
-                SELECT DISTINCT week FROM picks WHERE season = :season ORDER BY week
-            """), {"season": season}).fetchall()
+            # Process ALL elimination logic (picks, stuck games, missing picks)
+            elimination_results = updater.process_all_eliminations(db)
 
-            total_results = 0
-            for (week,) in weeks_with_picks:
-                print(f"   🔄 Processing elimination results for Week {week}...")
-                week_results = updater.update_pick_results(db, week)
-                total_results += week_results
-                print(f"      ✅ Created/updated {week_results} pick results")
-
-            print(f"   ✅ Re-calculated {total_results} elimination results from current games")
+            print(f"   ✅ Elimination processing complete:")
+            print(f"      - Pick results: {elimination_results['picks_updated']}")
+            print(f"      - Stuck games fixed: {elimination_results['stuck_games_fixed']}")
+            print(f"      - Missing pick eliminations: {elimination_results['missing_pick_eliminations']}")
         except Exception as e:
-            print(f"   ⚠️ Failed to re-calculate results: {e}")
+            print(f"   ⚠️ Failed to process eliminations: {e}")
             import traceback
             traceback.print_exc()
 
