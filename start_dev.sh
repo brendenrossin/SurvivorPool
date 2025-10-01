@@ -1,7 +1,7 @@
 #!/bin/bash
 # Dev environment startup script with multi-league support
 echo "🚀 Starting DEV environment with PORT=$PORT"
-echo "📝 Environment: DEV"
+echo "📝 Environment: DEV (multi-league)"
 echo "  PORT: $PORT"
 echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
 
@@ -9,13 +9,13 @@ echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
 echo "🗄️ Initializing database schema..."
 python init_db_railway.py
 
-# Run multi-league migration
+# Run multi-league migration FIRST (before anything else)
 echo "🏗️ Running multi-league migration..."
 python scripts/migrate_to_multi_league.py
 if [ $? -eq 0 ]; then
     echo "✅ Multi-league migration completed successfully"
 else
-    echo "⚠️ Multi-league migration failed or already applied"
+    echo "⚠️ Multi-league migration failed or already applied, continuing..."
 fi
 
 # Apply odds columns migration
