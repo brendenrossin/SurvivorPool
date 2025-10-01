@@ -65,9 +65,9 @@ INSERT INTO leagues (
     'Rossin Family Survivor Pool 2025',  -- Default name (can be updated)
     'rossin-family-2025',
     'google_sheets',
-    NULL,  -- Will be set by migration script from env var
+    'PLACEHOLDER',  -- Will be updated by migration script from env var
     2025,
-    NULL,  -- Will be set by migration script
+    'admin@example.com',  -- Will be updated by migration script
     'ROSSIN2025',  -- Default invite code
     '{
         "entry_fee": null,
