@@ -28,6 +28,53 @@ class ScoreUpdater:
         self.odds_provider = get_odds_provider(odds_provider_name)
         self.season = int(os.getenv("NFL_SEASON", 2025))
 
+    def process_all_eliminations(self, db: Session, current_week: int = None) -> dict:
+        """
+        SHARED HELPER: Process ALL elimination logic for all weeks with picks.
+        This ensures consistency between app startup, cron jobs, and sheet ingestion.
+
+        Returns dict with counts of what was processed.
+        """
+        if current_week is None:
+            current_week = self.score_provider.get_current_week(self.season)
+
+        print(f"🔄 Processing ALL elimination logic for Season {self.season}...")
+
+        # Find all weeks that have picks
+        all_weeks = db.query(Pick.week).filter(Pick.season == self.season).distinct().all()
+        all_weeks = sorted([w[0] for w in all_weeks])
+
+        if not all_weeks:
+            print("⚠️ No weeks with picks found")
+            return {"picks_updated": 0, "stuck_games_fixed": 0, "missing_pick_eliminations": 0}
+
+        print(f"📋 Found picks for weeks: {all_weeks}")
+
+        # Process pick results for each week
+        picks_updated = 0
+        for week in all_weeks:
+            print(f"🔄 Processing Week {week} pick results...")
+            week_picks = self.update_pick_results(db, week)
+            picks_updated += week_picks
+            if week_picks > 0:
+                print(f"  ✅ Updated {week_picks} pick results for Week {week}")
+
+        # Finalize any stuck games (games with scores but not marked final)
+        stuck_games_fixed = self.finalize_stuck_games(db)
+
+        # Auto-eliminate players with missing picks for completed weeks
+        missing_pick_eliminations = self.eliminate_missing_picks(db, current_week)
+
+        result = {
+            "picks_updated": picks_updated,
+            "stuck_games_fixed": stuck_games_fixed,
+            "missing_pick_eliminations": missing_pick_eliminations
+        }
+
+        print(f"✅ Elimination processing complete: {picks_updated} picks, {stuck_games_fixed} stuck games, {missing_pick_eliminations} missing pick eliminations")
+
+        return result
+
     def run(self, fetch_odds=False):
         """Main score update process"""
         db = SessionLocal()
@@ -55,30 +102,12 @@ class ScoreUpdater:
             # Update games in database
             games_updated = self.upsert_games(db, games_with_odds)
 
-            # Update pick results for current week
-            picks_updated = self.update_pick_results(db, current_week)
-
-            # IMPORTANT: Also process any previous weeks that have picks but no results
-            # This ensures we calculate eliminations for completed games
-            all_weeks = db.query(Pick.week).filter(Pick.season == self.season).distinct().all()
-            previous_weeks = [w[0] for w in all_weeks if w[0] < current_week]
-
-            for week in previous_weeks:
-                print(f"🔄 Backfilling pick results for Week {week}...")
-                week_picks_updated = self.update_pick_results(db, week)
-                picks_updated += week_picks_updated
-                if week_picks_updated > 0:
-                    print(f"  ✅ Updated {week_picks_updated} pick results for Week {week}")
-
-            # Also check and finalize any stuck games from previous weeks
-            stuck_games_fixed = self.finalize_stuck_games(db)
-
-            # Auto-eliminate players with missing picks for completed weeks
-            missing_pick_eliminations = self.eliminate_missing_picks(db, current_week)
+            # Process ALL elimination logic using shared helper
+            elimination_results = self.process_all_eliminations(db, current_week)
 
             db.commit()
 
-            message = f"Updated {games_updated} games, {picks_updated} pick results for week {current_week}, finalized {stuck_games_fixed} stuck games, eliminated {missing_pick_eliminations} players with missing picks"
+            message = f"Updated {games_updated} games, {elimination_results['picks_updated']} pick results, finalized {elimination_results['stuck_games_fixed']} stuck games, eliminated {elimination_results['missing_pick_eliminations']} players with missing picks"
             self.update_job_meta(db, "update_scores", "success", message)
 
             print(f"Score update completed: {message}")

@@ -42,15 +42,16 @@ def get_survivor_counts(db, game) -> Dict[str, int]:
 
 def create_game_display(game, home_pickers: List[str], away_pickers: List[str], db=None) -> Dict[str, Any]:
     """Create display data for a single game"""
-    from datetime import timezone, timedelta
+    from datetime import timezone
+    import pytz
 
     # Determine game status display
     if game.status == 'pre':
-        # Convert kickoff time to PST
-        pst_tz = timezone(timedelta(hours=-8))
+        # Convert kickoff time to Pacific (handles PST/PDT automatically)
+        pacific = pytz.timezone('America/Los_Angeles')
         if game.kickoff:
-            kickoff_pst = game.kickoff.replace(tzinfo=timezone.utc).astimezone(pst_tz)
-            status_display = f"🕐 {kickoff_pst.strftime('%m/%d %I:%M %p')}"
+            kickoff_pacific = game.kickoff.replace(tzinfo=timezone.utc).astimezone(pacific)
+            status_display = f"🕐 {kickoff_pacific.strftime('%m/%d %I:%M %p')}"
         else:
             status_display = "🕐 TBD"
 
@@ -228,11 +229,13 @@ def render_live_scores_widget(db, current_season: int, current_week: int):
 
                 # Show kickoff time for PRE games
                 if game['status'] == 'pre' and game['kickoff']:
-                    from datetime import timezone, timedelta
-                    pst_tz = timezone(timedelta(hours=-8))
-                    kickoff_pst = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-                    kickoff_time = kickoff_pst.strftime('%m/%d %I:%M %p PST')
-                    st.caption(f"Kickoff: {kickoff_time}")
+                    from datetime import timezone
+                    import pytz
+                    pacific = pytz.timezone('America/Los_Angeles')
+                    kickoff_pacific = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pacific)
+                    kickoff_time = kickoff_pacific.strftime('%m/%d %I:%M %p')
+                    tz_abbr = kickoff_pacific.strftime('%Z')
+                    st.caption(f"Kickoff: {kickoff_time} {tz_abbr}")
 
                 # Show betting odds for PRE games
                 if game['status'] == 'pre' and game['score_display'] != 'vs':
@@ -289,12 +292,13 @@ def render_compact_live_scores(db, current_season: int, current_week: int):
     ]
 
     if not active_games:
-        from datetime import timezone, timedelta
+        from datetime import timezone
+        import pytz
         next_game = min(live_scores, key=lambda x: x['kickoff'])
-        pst_tz = timezone(timedelta(hours=-8))
-        kickoff_pst = next_game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pst_tz)
+        pacific = pytz.timezone('America/Los_Angeles')
+        kickoff_pacific = next_game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pacific)
         st.caption(f"Next: {next_game['away_team']} @ {next_game['home_team']}")
-        st.caption(f"{kickoff_pst.strftime('%m/%d %I:%M %p')}")
+        st.caption(f"{kickoff_pacific.strftime('%m/%d %I:%M %p')}")
         return
 
     for game in active_games:
