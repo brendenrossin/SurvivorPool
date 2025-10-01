@@ -58,51 +58,327 @@ league_commissioners (new)
 
 ## 🚀 **Development Environment Setup**
 
-### **Step 1: Create Dev Railway Environment**
+### **Step 1: Add Dev Environment to Existing Railway Project**
+
+**IMPORTANT:** You should add a dev environment to your **EXISTING Railway project**, NOT create a new project. This keeps all environments (production, staging, dev) in one place.
+
+#### **1.1: Navigate to Your Existing Project**
 
 1. Go to Railway dashboard: https://railway.app
-2. Create **New Project** → "SurvivorPool-Dev"
-3. Add **PostgreSQL** service (separate from production)
-4. Add **Web Service** and connect to GitHub
-5. Configure deployment settings:
-   - **Branch**: `feature/multi-league`
-   - **Start Command**: `./start.sh`
-   - **Root Directory**: `/`
+2. Click on your **existing SurvivorPool project** (the one with production and staging)
+3. You should see your current services (e.g., "postgres", "web", etc.)
 
-### **Step 2: Set Environment Variables (Dev Railway)**
+#### **1.2: Add a New PostgreSQL Database for Dev**
 
-```bash
-# Database
-DATABASE_URL=<your-dev-postgres-url>
+1. Click **"+ New"** button in the top right
+2. Select **"Database"** → **"Add PostgreSQL"**
+3. The database will be created automatically
+4. **Rename the service** (click on the service name):
+   - Change from "Postgres" to **"postgres-dev"**
+   - This makes it clear it's the dev database
 
-# NFL Season
-NFL_SEASON=2025
+#### **1.3: Add a New Web Service for Dev**
 
-# Google Sheets (optional for testing)
-GOOGLE_SHEETS_SPREADSHEET_ID=<test-sheet-id>
-GOOGLE_SERVICE_ACCOUNT_JSON_BASE64=<service-account-creds>
+1. Click **"+ New"** button again
+2. Select **"GitHub Repo"**
+3. Choose your **SurvivorPool repository**
+4. Railway will create a new service
 
-# Commissioner Email (for default league)
-COMMISSIONER_EMAIL=your-email@example.com
+#### **1.4: Configure the Dev Web Service**
 
-# Development Flag
-IS_DEV_ENV=true
+1. Click on the newly created web service
+2. Go to **"Settings"** tab
+3. Configure the following:
 
-# Port (Railway sets this automatically)
-PORT=8080
+   **Service Name:**
+   - Change to: **"web-dev"** (so you can distinguish it from production)
+
+   **Source:**
+   - Click "Configure" under Source
+   - **Branch**: Select `feature/multi-league`
+   - **Root Directory**: `/` (leave as default)
+   - Click "Save"
+
+   **Build & Deploy:**
+   - **Start Command**: `./start.sh` (should be auto-detected from your code)
+   - **Build Command**: (leave empty, we use Dockerfile)
+
+   **Domains:**
+   - Railway will auto-generate a domain like `web-dev-production-abc123.up.railway.app`
+   - You can customize this later if you want
+
+#### **1.5: Link Dev Web Service to Dev Database**
+
+1. While still in the **web-dev service**, go to the **"Variables"** tab
+2. Click **"+ New Variable"**
+3. Add the following variables one by one:
+
+**Critical Variables:**
+
+| Variable Name | Value | Notes |
+|--------------|-------|-------|
+| `DATABASE_URL` | `${{postgres-dev.DATABASE_URL}}` | ⚠️ **CRITICAL**: Links to dev DB, not production! |
+| `NFL_SEASON` | `2025` | Current season |
+| `IS_DEV_ENV` | `true` | Flag to enable dev features |
+| `PORT` | `8080` | Railway sets this automatically, but good to have |
+
+**Optional (for Google Sheets testing):**
+
+| Variable Name | Value | Notes |
+|--------------|-------|-------|
+| `GOOGLE_SHEETS_SPREADSHEET_ID` | `<your-test-sheet-id>` | Use a TEST sheet, not production! |
+| `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` | `<base64-encoded-creds>` | Same as production (read-only) |
+| `COMMISSIONER_EMAIL` | `your-email@example.com` | For default league creation |
+
+**How to Set DATABASE_URL:**
+
+The syntax `${{postgres-dev.DATABASE_URL}}` is Railway's way of referencing another service's variable. Here's what it does:
+
+- `postgres-dev` = the name of your dev database service
+- `.DATABASE_URL` = the connection string variable from that service
+- Railway automatically replaces this with the actual database URL at runtime
+
+**Verify it's correct:**
+- After saving, click on `DATABASE_URL` to expand it
+- It should show a PostgreSQL connection string starting with `postgresql://`
+- Make sure it's different from your production database URL!
+
+#### **1.6: Deploy the Dev Environment**
+
+1. Go to the **"Deployments"** tab of your web-dev service
+2. Click **"Deploy"** (or wait for auto-deploy if enabled)
+3. Watch the build logs - you should see:
+   - `🚀 Starting app with PORT=8080`
+   - `🗄️ Initializing database...`
+   - Database migration messages
+   - `🎯 Starting Streamlit on port 8080`
+
+#### **1.7: Verify Dev Environment is Separate**
+
+**Check that dev is isolated from production:**
+
+1. **Dev database should be empty** (no players/picks yet)
+2. **Production database is untouched** (still has 127 survivors)
+3. **Dev URL is different** from production URL
+
+**Your Railway project should now look like this:**
+
+```
+SurvivorPool Project
+├── postgres (production database)
+│   └── Contains: 252 players, 127 survivors, all production data
+│
+├── postgres-dev (NEW - dev database)
+│   └── Contains: Empty (will be populated after migration)
+│
+├── web (production service)
+│   ├── Branch: main
+│   ├── URL: nfl-survivor-2025.up.railway.app
+│   └── Database: postgres
+│
+├── web-staging (staging service)
+│   ├── Branch: staging
+│   ├── URL: staging-xyz123.up.railway.app
+│   └── Database: postgres (shared with production)
+│
+└── web-dev (NEW - dev service)
+    ├── Branch: feature/multi-league
+    ├── URL: web-dev-abc456.up.railway.app
+    └── Database: postgres-dev (separate!)
 ```
 
-### **Step 3: Run Migration on Dev Database**
+**Why This Setup?**
+
+✅ **All environments in one project** = Easy to manage and compare
+✅ **Separate dev database** = Can't accidentally corrupt production data
+✅ **Automatic deployments** = Push to branch, Railway auto-deploys
+✅ **Easy rollback** = If dev breaks, production is unaffected
+✅ **Cost-effective** = Single Railway subscription covers all environments
+
+### **Step 2: Run Migration on Dev Database**
+
+Now that your dev environment is set up, you need to run the database migration to add multi-league support.
+
+#### **Method 1: Run Migration via Railway CLI (Easiest)**
+
+1. **Install Railway CLI** (if you haven't already):
+   ```bash
+   # Mac/Linux
+   brew install railway
+
+   # Or via npm
+   npm install -g @railway/cli
+   ```
+
+2. **Login to Railway:**
+   ```bash
+   railway login
+   ```
+
+3. **Link to your dev service:**
+   ```bash
+   # Navigate to your local project directory
+   cd /path/to/SurvivorPool
+
+   # Link to Railway
+   railway link
+   # Select: SurvivorPool project → web-dev service
+   ```
+
+4. **Run the migration:**
+   ```bash
+   railway run python scripts/migrate_to_multi_league.py
+   ```
+
+   You should see output like:
+   ```
+   ======================================================================
+   MULTI-LEAGUE MIGRATION - Adding league support to database
+   ======================================================================
+
+   📄 Reading migration from: db/migrations/001_add_multi_league_support.sql
+   🔄 Executing migration...
+   📝 Updating default league with environment values...
+   ✅ Migration executed successfully!
+
+   🔍 Verifying migration...
+     ✓ Leagues table created: 1 league(s)
+     ✓ Players migrated: 0 player(s) with league_id
+     ✓ Picks migrated: 0 pick(s) with league_id
+     ✓ Users table created: 0 user(s)
+
+   ======================================================================
+   ✨ MIGRATION COMPLETE!
+   ======================================================================
+   ```
+
+#### **Method 2: Run Migration Locally (Alternative)**
+
+If Railway CLI doesn't work, you can run the migration from your local machine:
+
+1. **Get the dev database URL from Railway:**
+   - Go to Railway dashboard
+   - Click on **postgres-dev** service
+   - Go to **"Variables"** tab
+   - Copy the `DATABASE_URL` value (starts with `postgresql://`)
+
+2. **Run migration locally pointing to dev database:**
+   ```bash
+   # Set environment variable to dev database
+   export DATABASE_URL="postgresql://postgres:abc123@containers-us-west-xyz.railway.app:1234/railway"
+
+   # Run migration
+   python scripts/migrate_to_multi_league.py
+   ```
+
+3. **Verify migration succeeded:**
+   ```bash
+   # Check that tables were created
+   psql $DATABASE_URL -c "SELECT * FROM leagues;"
+
+   # Should show 1 league (the default league)
+   ```
+
+#### **Method 3: Via Railway Web Interface (Last Resort)**
+
+If neither of the above work:
+
+1. Go to Railway dashboard → **web-dev** service
+2. Go to **"Deployments"** tab
+3. Click on the most recent deployment
+4. Click **"View Logs"**
+5. The migration should run automatically on startup (if configured in `start.sh`)
+
+**⚠️ Important Notes:**
+
+- The migration is **idempotent** - safe to run multiple times
+- The dev database starts empty, so migration will create tables from scratch
+- Default league (ID=1) will be created automatically
+- No production data will be affected (completely separate database)
+
+### **Step 3: Verify Migration and Test Dev Environment**
+
+After the migration completes, verify everything is set up correctly:
+
+#### **3.1: Check Dev Database Has League Tables**
 
 ```bash
-# Locally, pointing to dev database
-export DATABASE_URL="<dev-database-url>"
-python scripts/migrate_to_multi_league.py
+# Connect to dev database (using DATABASE_URL from Railway)
+psql $DATABASE_URL
+
+# List all tables
+\dt
+
+# You should see:
+# - leagues
+# - users
+# - user_players
+# - league_commissioners
+# - players (with league_id column)
+# - picks (with league_id column)
+# - games
+# - pick_results
+# - job_meta
+
+# Check default league was created
+SELECT * FROM leagues;
+
+# Should show 1 row with league_id=1
 ```
 
-Or on Railway (via exec):
+#### **3.2: Test the Dev Dashboard**
+
+1. Open your dev environment URL (e.g., `https://web-dev-abc456.up.railway.app`)
+2. The dashboard should load (but with no data since it's a fresh database)
+3. You should see:
+   - "0 Remaining Survivors"
+   - "0 Total Players"
+   - Empty charts
+
+**This is EXPECTED!** The dev database is empty - we'll populate it next.
+
+#### **3.3: Populate Dev Database with Test Data (Optional)**
+
+If you want to test with real data, you can:
+
+**Option A: Copy production data to dev (for testing)**
+
 ```bash
-railway run python scripts/migrate_to_multi_league.py
+# Dump production data
+pg_dump $PRODUCTION_DATABASE_URL > production_backup.sql
+
+# Restore to dev (CAUTION: This will overwrite dev data)
+psql $DEV_DATABASE_URL < production_backup.sql
+```
+
+**Option B: Use mock data (safer for testing)**
+
+```bash
+# If you have a mock data script
+railway run python scripts/railway_populate_mock.py
+```
+
+**Option C: Manually create test data**
+
+```bash
+railway run python -c "
+from api.database import SessionLocal
+from api.models import League, Player, Pick
+
+db = SessionLocal()
+
+# Verify default league exists
+league = db.query(League).filter(League.league_id == 1).first()
+print(f'Default league: {league.league_name}')
+
+# Create a test player
+player = Player(display_name='Test Player', league_id=1)
+db.add(player)
+db.commit()
+
+print(f'Created test player: {player.display_name}')
+db.close()
+"
 ```
 
 ---
