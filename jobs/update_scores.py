@@ -13,7 +13,7 @@ from sqlalchemy import and_
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api.database import SessionLocal
-from api.models import Game, Pick, PickResult, JobMeta
+from api.models import Game, Pick, PickResult, JobMeta, Player
 from api.score_providers import get_score_provider
 from api.odds_providers import get_odds_provider
 from dotenv import load_dotenv
@@ -73,9 +73,12 @@ class ScoreUpdater:
             # Also check and finalize any stuck games from previous weeks
             stuck_games_fixed = self.finalize_stuck_games(db)
 
+            # Auto-eliminate players with missing picks for completed weeks
+            missing_pick_eliminations = self.eliminate_missing_picks(db, current_week)
+
             db.commit()
 
-            message = f"Updated {games_updated} games, {picks_updated} pick results for week {current_week}, finalized {stuck_games_fixed} stuck games"
+            message = f"Updated {games_updated} games, {picks_updated} pick results for week {current_week}, finalized {stuck_games_fixed} stuck games, eliminated {missing_pick_eliminations} players with missing picks"
             self.update_job_meta(db, "update_scores", "success", message)
 
             print(f"Score update completed: {message}")
@@ -305,6 +308,120 @@ class ScoreUpdater:
             print(f"✅ Finalized {fixed_count} stuck games")
 
         return fixed_count
+
+    def eliminate_missing_picks(self, db: Session, current_week: int) -> int:
+        """
+        Auto-eliminate players who failed to submit picks for completed weeks.
+        Creates a "No pick" entry for players who were still alive but didn't submit.
+        """
+        eliminated_count = 0
+
+        # Get all players who are still alive (no eliminations yet)
+        eliminated_player_ids = db.query(Pick.player_id).join(PickResult).filter(
+            and_(
+                Pick.season == self.season,
+                PickResult.survived == False
+            )
+        ).distinct().all()
+        eliminated_player_ids = {p[0] for p in eliminated_player_ids}
+
+        # Get all players who have made at least one pick this season
+        all_active_players = db.query(Pick.player_id).filter(
+            Pick.season == self.season
+        ).distinct().all()
+        all_active_players = {p[0] for p in all_active_players}
+
+        # Get alive players
+        alive_player_ids = all_active_players - eliminated_player_ids
+
+        print(f"🔍 Checking for missing picks: {len(alive_player_ids)} players still alive")
+
+        # Check each completed week to see if alive players have picks
+        for week in range(1, current_week):
+            # Check if all games for this week are completed
+            week_games = db.query(Game).filter(
+                and_(
+                    Game.season == self.season,
+                    Game.week == week
+                )
+            ).all()
+
+            if not week_games:
+                continue
+
+            all_games_final = all(g.status == "final" for g in week_games)
+
+            if not all_games_final:
+                continue
+
+            # Get players who submitted picks for this week
+            players_with_picks = db.query(Pick.player_id).filter(
+                and_(
+                    Pick.season == self.season,
+                    Pick.week == week,
+                    Pick.player_id.in_(alive_player_ids)
+                )
+            ).distinct().all()
+            players_with_picks = {p[0] for p in players_with_picks}
+
+            # Find players missing picks for this week
+            missing_pick_players = alive_player_ids - players_with_picks
+
+            for player_id in missing_pick_players:
+                # Check if we already created a "No pick" elimination for this player/week
+                existing_no_pick = db.query(Pick).filter(
+                    and_(
+                        Pick.player_id == player_id,
+                        Pick.season == self.season,
+                        Pick.week == week,
+                        Pick.team_abbr == None
+                    )
+                ).first()
+
+                if existing_no_pick:
+                    continue  # Already handled
+
+                # Get player's last submitted week
+                last_pick = db.query(Pick).filter(
+                    and_(
+                        Pick.player_id == player_id,
+                        Pick.season == self.season,
+                        Pick.week < week
+                    )
+                ).order_by(Pick.week.desc()).first()
+
+                if last_pick:  # Only eliminate if they had been participating
+                    print(f"  ⚠️  Player {player_id} missing pick for Week {week} - auto-eliminating")
+
+                    # Create a "No pick" elimination entry
+                    no_pick = Pick(
+                        player_id=player_id,
+                        season=self.season,
+                        week=week,
+                        team_abbr=None,  # No team picked
+                        source="auto_elimination"
+                    )
+                    db.add(no_pick)
+                    db.flush()  # Get the pick_id
+
+                    # Create a failed pick result
+                    pick_result = PickResult(
+                        pick_id=no_pick.pick_id,
+                        game_id=None,  # No game associated
+                        is_valid=False,
+                        is_locked=True,
+                        survived=False
+                    )
+                    db.add(pick_result)
+
+                    eliminated_count += 1
+                    # Remove from alive_player_ids so we don't eliminate them again in future weeks
+                    alive_player_ids.discard(player_id)
+
+        if eliminated_count > 0:
+            print(f"✅ Auto-eliminated {eliminated_count} players for missing picks")
+
+        return eliminated_count
 
     def update_job_meta(self, db: Session, job_name: str, status: str, message: str):
         """Update job metadata"""
