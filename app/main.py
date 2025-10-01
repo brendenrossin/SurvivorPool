@@ -471,15 +471,27 @@ def render_weekly_picks_chart(summary):
     # Add current week picks table
     try:
         from api.database import SessionLocal
-        from api.models import Game
+        from api.models import Game, Pick
 
         # Get current week from database
+        # Use the latest week with picks (not games), so we show Week 5 picks
+        # even if Week 5 games haven't started yet
         db = SessionLocal()
         try:
-            latest_week_result = db.query(Game.week).filter(
+            # Check latest week with picks
+            latest_pick_week = db.query(Pick.week).filter(
+                Pick.season == SEASON
+            ).order_by(Pick.week.desc()).first()
+
+            # Also check latest week with games
+            latest_game_week = db.query(Game.week).filter(
                 Game.season == SEASON
             ).order_by(Game.week.desc()).first()
-            current_week = latest_week_result.week if latest_week_result else 1
+
+            # Use whichever is higher (picks or games)
+            pick_week = latest_pick_week.week if latest_pick_week else 1
+            game_week = latest_game_week.week if latest_game_week else 1
+            current_week = max(pick_week, game_week)
         finally:
             try:
                 db.close()
