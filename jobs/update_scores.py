@@ -16,17 +16,19 @@ from api.database import SessionLocal
 from api.models import Game, Pick, PickResult, JobMeta, Player
 from api.score_providers import get_score_provider
 from api.odds_providers import get_odds_provider
+from api.config import DEFAULT_LEAGUE_ID
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class ScoreUpdater:
-    def __init__(self):
+    def __init__(self, league_id: int = DEFAULT_LEAGUE_ID):
         provider_name = os.getenv("SCORES_PROVIDER", "espn")
         self.score_provider = get_score_provider(provider_name)
         odds_provider_name = os.getenv("ODDS_PROVIDER", "the_odds_api")
         self.odds_provider = get_odds_provider(odds_provider_name)
         self.season = int(os.getenv("NFL_SEASON", 2025))
+        self.league_id = league_id
 
     def process_all_eliminations(self, db: Session, current_week: int = None) -> dict:
         """
@@ -38,10 +40,15 @@ class ScoreUpdater:
         if current_week is None:
             current_week = self.score_provider.get_current_week(self.season)
 
-        print(f"🔄 Processing ALL elimination logic for Season {self.season}...")
+        print(f"🔄 Processing ALL elimination logic for Season {self.season}, League {self.league_id}...")
 
         # Find all weeks that have picks
-        all_weeks = db.query(Pick.week).filter(Pick.season == self.season).distinct().all()
+        all_weeks = db.query(Pick.week).filter(
+            and_(
+                Pick.season == self.season,
+                Pick.league_id == self.league_id
+            )
+        ).distinct().all()
         all_weeks = sorted([w[0] for w in all_weeks])
 
         if not all_weeks:
@@ -190,6 +197,7 @@ class ScoreUpdater:
         picks = db.query(Pick).filter(
             and_(
                 Pick.season == self.season,
+                Pick.league_id == self.league_id,
                 Pick.week == week,
                 Pick.team_abbr.isnot(None)
             )
@@ -310,9 +318,12 @@ class ScoreUpdater:
 
                 # Update any pick results for this game
                 picks = db.query(Pick).filter(
-                    Pick.season == game.season,
-                    Pick.week == game.week,
-                    ((Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team))
+                    and_(
+                        Pick.season == game.season,
+                        Pick.league_id == self.league_id,
+                        Pick.week == game.week,
+                        ((Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team))
+                    )
                 ).all()
 
                 for pick in picks:
@@ -349,6 +360,7 @@ class ScoreUpdater:
         eliminated_player_ids = db.query(Pick.player_id).join(PickResult).filter(
             and_(
                 Pick.season == self.season,
+                Pick.league_id == self.league_id,
                 PickResult.survived == False
             )
         ).distinct().all()
@@ -356,7 +368,10 @@ class ScoreUpdater:
 
         # Get all players who have made at least one pick this season
         all_active_players = db.query(Pick.player_id).filter(
-            Pick.season == self.season
+            and_(
+                Pick.season == self.season,
+                Pick.league_id == self.league_id
+            )
         ).distinct().all()
         all_active_players = {p[0] for p in all_active_players}
 
@@ -387,6 +402,7 @@ class ScoreUpdater:
             players_with_picks = db.query(Pick.player_id).filter(
                 and_(
                     Pick.season == self.season,
+                    Pick.league_id == self.league_id,
                     Pick.week == week,
                     Pick.player_id.in_(alive_player_ids)
                 )
@@ -402,6 +418,7 @@ class ScoreUpdater:
                     and_(
                         Pick.player_id == player_id,
                         Pick.season == self.season,
+                        Pick.league_id == self.league_id,
                         Pick.week == week,
                         Pick.team_abbr == None
                     )
@@ -415,6 +432,7 @@ class ScoreUpdater:
                     and_(
                         Pick.player_id == player_id,
                         Pick.season == self.season,
+                        Pick.league_id == self.league_id,
                         Pick.week < week
                     )
                 ).order_by(Pick.week.desc()).first()
@@ -425,6 +443,7 @@ class ScoreUpdater:
                     # Create a "No pick" elimination entry
                     no_pick = Pick(
                         player_id=player_id,
+                        league_id=self.league_id,
                         season=self.season,
                         week=week,
                         team_abbr=None,  # No team picked

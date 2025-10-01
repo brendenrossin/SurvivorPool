@@ -12,6 +12,7 @@ from datetime import datetime
 
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult, Game, JobMeta
+from api.config import DEFAULT_LEAGUE_ID
 
 @st.cache_resource
 def get_db_session():
@@ -25,28 +26,37 @@ def load_team_data() -> Dict:
         return json.load(f)
 
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
-def get_summary_data(season: int) -> Dict:
+def get_summary_data(season: int, league_id: int = DEFAULT_LEAGUE_ID) -> Dict:
     """Get summary data for dashboard"""
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
         # Get weeks with picks
-        weeks_query = db.query(Pick.week).filter(Pick.season == season).distinct().all()
+        weeks_query = db.query(Pick.week).filter(
+            and_(
+                Pick.season == season,
+                Pick.league_id == league_id
+            )
+        ).distinct().all()
         weeks = sorted([w[0] for w in weeks_query])
 
         # Get total entrants
-        total_entrants = db.query(Player).count()
+        total_entrants = db.query(Player).filter(Player.league_id == league_id).count()
 
         # Get remaining players (no survived=False)
         eliminated_players = db.query(Pick.player_id).join(PickResult).filter(
             and_(
                 Pick.season == season,
+                Pick.league_id == league_id,
                 PickResult.survived == False
             )
         ).distinct().subquery()
 
         remaining_players = db.query(Player).filter(
-            ~Player.player_id.in_(select(eliminated_players.c.player_id))
+            and_(
+                Player.league_id == league_id,
+                ~Player.player_id.in_(select(eliminated_players.c.player_id))
+            )
         ).count()
 
         # Get picks by week and team
@@ -58,6 +68,7 @@ def get_summary_data(season: int) -> Dict:
             ).filter(
                 and_(
                     Pick.season == season,
+                    Pick.league_id == league_id,
                     Pick.week == week,
                     Pick.team_abbr.isnot(None)
                 )
@@ -81,12 +92,17 @@ def get_summary_data(season: int) -> Dict:
     finally:
         db.close()
 
-def get_player_data(player_name: str, season: int) -> Optional[Dict]:
+def get_player_data(player_name: str, season: int, league_id: int = DEFAULT_LEAGUE_ID) -> Optional[Dict]:
     """Get individual player data"""
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
-        player = db.query(Player).filter(Player.display_name == player_name).first()
+        player = db.query(Player).filter(
+            and_(
+                Player.display_name == player_name,
+                Player.league_id == league_id
+            )
+        ).first()
         if not player:
             return None
 
@@ -97,7 +113,8 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
         ).filter(
             and_(
                 Pick.player_id == player.player_id,
-                Pick.season == season
+                Pick.season == season,
+                Pick.league_id == league_id
             )
         ).order_by(Pick.week).all()
 
@@ -123,7 +140,7 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
         db.close()
 
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
-def get_meme_stats(season: int) -> Dict:
+def get_meme_stats(season: int, league_id: int = DEFAULT_LEAGUE_ID) -> Dict:
     """Get meme statistics for dashboard"""
     SessionFactory = get_db_session()
     db = SessionFactory()
@@ -150,6 +167,7 @@ def get_meme_stats(season: int) -> Dict:
                 AND g.season = pi.season
             )
             WHERE pi.season = :season
+                AND pi.league_id = :league_id
                 AND pr.survived = FALSE
                 AND g.home_score IS NOT NULL
                 AND g.away_score IS NOT NULL
@@ -158,7 +176,7 @@ def get_meme_stats(season: int) -> Dict:
             LIMIT 5
         """)
 
-        dumbest_results = db.execute(dumbest_query, {"season": season}).fetchall()
+        dumbest_results = db.execute(dumbest_query, {"season": season, "league_id": league_id}).fetchall()
 
         dumbest_picks = []
         for row in dumbest_results:
@@ -231,6 +249,7 @@ def get_meme_stats(season: int) -> Dict:
                 AND g.season = pi.season
             )
             WHERE pi.season = :season
+                AND pi.league_id = :league_id
                 AND pr.survived = TRUE
                 AND g.home_score IS NOT NULL
                 AND g.away_score IS NOT NULL
@@ -281,7 +300,7 @@ def get_meme_stats(season: int) -> Dict:
             LIMIT 5
         """)
 
-        big_balls_results = db.execute(big_balls_query, {"season": season}).fetchall()
+        big_balls_results = db.execute(big_balls_query, {"season": season, "league_id": league_id}).fetchall()
 
         big_balls_picks = []
         for row in big_balls_results:
@@ -314,13 +333,16 @@ def get_meme_stats(season: int) -> Dict:
         db.close()
 
 @st.cache_data(ttl=300)  # 5 minute cache for player searches
-def search_players(query: str) -> List[str]:
+def search_players(query: str, league_id: int = DEFAULT_LEAGUE_ID) -> List[str]:
     """Search for players by name"""
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
         players = db.query(Player.display_name).filter(
-            Player.display_name.ilike(f"%{query}%")
+            and_(
+                Player.display_name.ilike(f"%{query}%"),
+                Player.league_id == league_id
+            )
         ).all()
 
         return [p[0] for p in players]

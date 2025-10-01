@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult
 from api.sheets_personal_railway import RailwayPersonalSheetsClient
+from api.config import DEFAULT_LEAGUE_ID
 from dotenv import load_dotenv
 from sqlalchemy import text
 
@@ -51,12 +52,12 @@ def parse_picks_data(picks_data):
     print(f"✅ Parsed {len(players_data)} players from Google Sheets")
     return players_data
 
-def ingest_players_and_picks(players_data):
+def ingest_players_and_picks(players_data, league_id: int = DEFAULT_LEAGUE_ID):
     """Insert/update players and picks in database"""
     db = SessionLocal()
 
     try:
-        print("👥 Ingesting players and picks...")
+        print(f"👥 Ingesting players and picks for league {league_id}...")
 
         season = int(os.getenv('NFL_SEASON', 2025))
 
@@ -64,8 +65,8 @@ def ingest_players_and_picks(players_data):
         print("🧹 Clearing existing pick and player data...")
 
         # Delete picks and players (this cascades to pick_results)
-        db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
-        db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
+        db.execute(text("DELETE FROM picks WHERE season = :season AND league_id = :league_id"), {"season": season, "league_id": league_id})
+        db.execute(text("DELETE FROM players WHERE league_id = :league_id"), {"league_id": league_id})  # Clear league players to avoid orphans
         db.commit()
         print("✅ Existing data cleared")
 
@@ -75,10 +76,13 @@ def ingest_players_and_picks(players_data):
 
         for player_name, weekly_picks in players_data.items():
             # Get or create player
-            player = db.query(Player).filter(Player.display_name == player_name).first()
+            player = db.query(Player).filter(
+                Player.display_name == player_name,
+                Player.league_id == league_id
+            ).first()
 
             if not player:
-                player = Player(display_name=player_name)
+                player = Player(display_name=player_name, league_id=league_id)
                 db.add(player)
                 db.flush()  # Get ID
                 players_created += 1
@@ -89,6 +93,7 @@ def ingest_players_and_picks(players_data):
                 # Check if pick already exists
                 existing_pick = db.query(Pick).filter(
                     Pick.player_id == player.player_id,
+                    Pick.league_id == league_id,
                     Pick.season == season,
                     Pick.week == week
                 ).first()
@@ -103,6 +108,7 @@ def ingest_players_and_picks(players_data):
                     # Create new pick
                     new_pick = Pick(
                         player_id=player.player_id,
+                        league_id=league_id,
                         season=season,
                         week=week,
                         team_abbr=team,
@@ -118,7 +124,7 @@ def ingest_players_and_picks(players_data):
             # Use SHARED HELPER to ensure consistency
             from jobs.update_scores import ScoreUpdater
 
-            updater = ScoreUpdater()
+            updater = ScoreUpdater(league_id=league_id)
 
             # Process ALL elimination logic (picks, stuck games, missing picks)
             elimination_results = updater.process_all_eliminations(db)

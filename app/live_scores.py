@@ -10,7 +10,9 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any
 import os
+from sqlalchemy import and_
 from app.odds_helpers import format_pregame_line
+from api.config import DEFAULT_LEAGUE_ID
 
 def get_survivor_counts(db, game) -> Dict[str, int]:
     """Calculate survivor counts for a final game"""
@@ -25,6 +27,7 @@ def get_survivor_counts(db, game) -> Dict[str, int]:
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
             Pick.season == game.season,
+            Pick.league_id == DEFAULT_LEAGUE_ID,
             Pick.week == game.week,
             (Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team)
         )
@@ -113,6 +116,7 @@ def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dic
             Player, Pick.player_id == Player.player_id
         ).filter(
             Pick.season == current_season,
+            Pick.league_id == DEFAULT_LEAGUE_ID,
             Pick.week == current_week,
             Pick.team_abbr.is_not(None)
         )

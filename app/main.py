@@ -46,6 +46,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
+from api.config import DEFAULT_LEAGUE_ID
 SEASON = int(os.getenv("NFL_SEASON", 2025))
 team_data = load_team_data()
 
@@ -474,6 +475,7 @@ def render_weekly_picks_chart(summary):
     try:
         from api.database import SessionLocal
         from api.models import Game, Pick
+        from sqlalchemy import and_
 
         # Get current week from database
         # Use the latest week with picks (not games), so we show Week 5 picks
@@ -482,7 +484,10 @@ def render_weekly_picks_chart(summary):
         try:
             # Check latest week with picks
             latest_pick_week = db.query(Pick.week).filter(
-                Pick.season == SEASON
+                and_(
+                    Pick.season == SEASON,
+                    Pick.league_id == DEFAULT_LEAGUE_ID
+                )
             ).order_by(Pick.week.desc()).first()
 
             # Also check latest week with games
