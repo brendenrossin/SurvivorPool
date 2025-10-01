@@ -518,46 +518,57 @@ git push origin staging
 
 ## 📊 **Current Status**
 
-### **✅ Completed**
+### **✅ Phase 1 - Backend Schema (COMPLETE)**
 
 - [x] Database migration SQL created
 - [x] Migration Python script created
 - [x] SQLAlchemy models updated (League, User, UserPlayer, LeagueCommissioner)
 - [x] `league_id` added to Player and Pick models
 - [x] Feature branch created (`feature/multi-league`)
+- [x] Dev Railway environment created and configured
+- [x] Migration ran successfully on dev database
 
-### **🚧 In Progress**
+### **✅ Phase 2 - Query Layer Updates (COMPLETE)**
 
-- [ ] Run migration on dev database
-- [ ] Update all queries to filter by league_id
-- [ ] Test backward compatibility
-- [ ] Create Dev Railway environment
+- [x] Created `api/config.py` with `DEFAULT_LEAGUE_ID = 1` constant
+- [x] Updated `app/dashboard_data.py` - all functions filter by `league_id`
+- [x] Updated `app/live_scores.py` - pick queries filter by `DEFAULT_LEAGUE_ID`
+- [x] Updated `app/main.py` - latest pick week query filters by `DEFAULT_LEAGUE_ID`
+- [x] Updated `jobs/update_scores.py` - `ScoreUpdater` accepts `league_id` parameter
+- [x] Updated `jobs/ingest_personal_sheets.py` - sheets ingestion filters by `league_id`
+- [x] Tested backward compatibility - all queries work with multi-league schema
+- [x] Pushed to dev environment for testing
+
+### **🚧 Phase 3 - UI Development (IN PROGRESS)**
+
+- [ ] Build league selection UI (dropdown to switch between leagues)
+- [ ] Build league creation page
+- [ ] Build commissioner dashboard
+- [ ] Build invite link generation
 
 ### **📋 Next Steps**
 
-1. **Deploy to Dev Railway**
-   - Create new Railway project
-   - Point to `feature/multi-league` branch
-   - Run migration on dev database
+1. **Verify Dev Deployment**
+   - Check Railway dev deployment logs
+   - Verify app starts successfully with multi-league schema
+   - Test dashboard functionality on dev URL
 
-2. **Update Query Layer**
-   - Add `DEFAULT_LEAGUE_ID = 1` constant
-   - Update all `db.query(Player)` → `db.query(Player).filter(Player.league_id == league_id)`
-   - Update sheets ingestion to use league_id
+2. **Build League Management UI**
+   - League selection dropdown in sidebar
+   - League creation page (form with name, slug, pick source)
+   - Commissioner dashboard (manage players, view stats)
+   - Invite code generation and display
 
-3. **Test Backward Compatibility**
-   - Ensure existing dashboard works identically
-   - Verify data integrity after migration
-
-4. **Build League Management UI**
-   - League creation page
-   - Commissioner dashboard
-   - Invite link generation
-
-5. **Build In-App Picks**
-   - User authentication
+3. **Build In-App Picks (Phase 4)**
+   - User authentication system
    - Pick submission form
    - Pick validation logic
+   - Pick locking when games start
+
+4. **Test Multi-League Functionality**
+   - Create second test league
+   - Verify data isolation between leagues
+   - Test league switching in UI
 
 ---
 
@@ -597,5 +608,5 @@ For questions or issues:
 
 ---
 
-**Last Updated:** 2025-01-10
-**Status:** Phase 1 - Backend Schema Complete
+**Last Updated:** 2025-10-01
+**Status:** Phase 2 - Query Layer Updates Complete ✅
