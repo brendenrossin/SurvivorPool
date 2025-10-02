@@ -33,7 +33,8 @@ from app.dashboard_data import (
     get_player_data,
     get_meme_stats,
     search_players,
-    get_all_leagues
+    get_all_leagues,
+    get_league_by_slug
 )
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
 from app.team_of_doom import render_team_of_doom_widget
@@ -53,57 +54,75 @@ team_data = load_team_data()
 
 def main():
     # ========================================================================
-    # LEAGUE SELECTION (Multi-League Support)
+    # LEAGUE ROUTING (URL-based Multi-League Support)
     # ========================================================================
 
-    # Initialize session state for selected league
-    if 'selected_league_id' not in st.session_state:
-        st.session_state.selected_league_id = DEFAULT_LEAGUE_ID
+    # Get league slug from URL query params (e.g., ?league=rossin-family-2025)
+    league_slug = st.query_params.get("league", None)
 
-    # Get all leagues for current season
+    # If no league specified in URL, try to get default league
+    if not league_slug:
+        # Get all leagues and use the first one (or default)
+        all_leagues = get_all_leagues(SEASON)
+        if all_leagues:
+            # Use the first league as default
+            default_league = all_leagues[0]
+            league_slug = default_league['league_slug']
+            # Redirect to URL with league slug
+            st.query_params["league"] = league_slug
+        else:
+            # No leagues exist - show error
+            st.error("🚫 No leagues found. Please contact your administrator.")
+            st.stop()
+
+    # Look up league by slug
+    current_league = get_league_by_slug(league_slug, SEASON)
+
+    if not current_league:
+        # Invalid league slug - show error with league list
+        st.error(f"🚫 League not found: `{league_slug}`")
+
+        all_leagues = get_all_leagues(SEASON)
+        if all_leagues:
+            st.info("**Available leagues:**")
+            for league in all_leagues:
+                league_url = f"?league={league['league_slug']}"
+                st.markdown(f"- [{league['league_name']}]({league_url}) (`{league['league_slug']}`)")
+        st.stop()
+
+    # Use the league_id from the current league
+    league_id = current_league['league_id']
+
+    # ========================================================================
+    # LEAGUE SWITCHER (Sidebar - Optional)
+    # ========================================================================
+
+    # Get all leagues to show switcher (if multiple leagues exist)
     all_leagues = get_all_leagues(SEASON)
 
-    # Only show league selector if there are multiple leagues
     if len(all_leagues) > 1:
         with st.sidebar:
-            st.markdown("### 🏈 League Selection")
+            st.markdown("### 🏈 Switch League")
 
-            # Create league options for selectbox
-            league_options = {
-                f"{league['league_name']} ({league['league_slug']})": league['league_id']
-                for league in all_leagues
-            }
+            # Show current league
+            st.markdown(f"**Current:** {current_league['league_name']}")
+            st.caption(f"Slug: `{current_league['league_slug']}`")
 
-            # Find current selection
-            current_league_name = None
+            # Show other leagues as links
+            st.markdown("**Other Leagues:**")
             for league in all_leagues:
-                if league['league_id'] == st.session_state.selected_league_id:
-                    current_league_name = f"{league['league_name']} ({league['league_slug']})"
-                    break
-
-            # If current league not found, default to first league
-            if not current_league_name and league_options:
-                current_league_name = list(league_options.keys())[0]
-                st.session_state.selected_league_id = league_options[current_league_name]
-
-            # League selector dropdown
-            selected_league_name = st.selectbox(
-                "Select League:",
-                options=list(league_options.keys()),
-                index=list(league_options.keys()).index(current_league_name) if current_league_name in league_options else 0,
-                key="league_selector"
-            )
-
-            # Update session state if selection changed
-            new_league_id = league_options[selected_league_name]
-            if new_league_id != st.session_state.selected_league_id:
-                st.session_state.selected_league_id = new_league_id
-                st.rerun()  # Rerun to refresh data with new league
+                if league['league_slug'] != league_slug:
+                    league_url = f"?league={league['league_slug']}"
+                    st.markdown(f"- [{league['league_name']}]({league_url})")
 
             st.markdown("---")
 
-    # Use selected league ID for all queries
-    league_id = st.session_state.selected_league_id
+            # Show shareable link
+            with st.expander("📎 Share League Link"):
+                base_url = "https://web-dev-production.up.railway.app"  # Will be dynamic later
+                shareable_url = f"{base_url}?league={current_league['league_slug']}"
+                st.code(shareable_url, language=None)
+                st.caption("Share this link with league members!")
 
     # Load Inter font and modern CSS styling
     st.markdown("""
@@ -180,8 +199,9 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # Header
-    st.title(f"Survivor {SEASON} — Live Dashboard")
+    # Header with league name
+    st.title(f"{current_league['league_name']}")
+    st.caption(f"Survivor {SEASON} — Live Dashboard")
 
     # Subtle gradient header band
     st.markdown("""
@@ -197,7 +217,7 @@ def main():
     with st.container():
         col_left, col_right = st.columns([0.72, 0.28])
         with col_left:
-            st.caption("Live elimination tracking • NFL " + str(SEASON))
+            st.caption(f"Live elimination tracking • NFL {SEASON} • {current_league['league_slug']}")
         with col_right:
             # Last update chip
             try:

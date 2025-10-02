@@ -370,3 +370,33 @@ def get_all_leagues(season: int) -> List[Dict]:
 
     finally:
         db.close()
+
+@st.cache_data(ttl=60)  # 60 second cache for league lookup
+def get_league_by_slug(league_slug: str, season: int) -> Optional[Dict]:
+    """Get league by slug for URL routing"""
+    from api.models import League
+
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        league = db.query(League).filter(
+            and_(
+                League.league_slug == league_slug,
+                League.season == season
+            )
+        ).first()
+
+        if not league:
+            return None
+
+        return {
+            "league_id": league.league_id,
+            "league_name": league.league_name,
+            "league_slug": league.league_slug,
+            "pick_source": league.pick_source,
+            "commissioner_email": league.commissioner_email,
+            "invite_code": league.invite_code
+        }
+
+    finally:
+        db.close()
