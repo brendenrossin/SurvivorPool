@@ -13,12 +13,25 @@ from app.mobile_plotly_config import render_mobile_chart
 def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
     """
     Get data for eliminated players (the graveyard)
+    Only shows the FIRST elimination for each player (the week they were actually eliminated)
     """
     from api.models import Pick, PickResult, Game, Player
+    from sqlalchemy import or_, func
 
     try:
-        # Get all eliminated players - those with at least one pick that didn't survive
-        # Use team/week matching since game_id may not be set correctly
+        # First, find the earliest week each player was eliminated
+        # This subquery finds the minimum week where survived=False for each player
+        first_elimination_week = db.query(
+            Pick.player_id,
+            func.min(Pick.week).label('elimination_week')
+        ).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == current_season,
+            PickResult.survived == False
+        ).group_by(Pick.player_id).subquery()
+
+        # Now get the full elimination details for only the first elimination
         eliminated_query = db.query(
             Player.display_name,
             Pick.week,
@@ -34,14 +47,17 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
         ).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).join(
-            Game, (Game.home_team == Pick.team_abbr) | (Game.away_team == Pick.team_abbr)
+            first_elimination_week,
+            (Pick.player_id == first_elimination_week.c.player_id) &
+            (Pick.week == first_elimination_week.c.elimination_week)
+        ).outerjoin(  # LEFT JOIN for games (includes missed picks)
+            Game,
+            ((Game.home_team == Pick.team_abbr) | (Game.away_team == Pick.team_abbr)) &
+            (Game.week == Pick.week) &
+            (Game.season == current_season)
         ).filter(
             Pick.season == current_season,
-            Game.season == current_season,
-            Game.week == Pick.week,
-            PickResult.survived == False,  # Only eliminated picks
-            Game.home_score.isnot(None),
-            Game.away_score.isnot(None)  # Only games with scores
+            PickResult.survived == False
         ).order_by(Pick.week, Player.display_name)
 
         eliminated = eliminated_query.all()
@@ -51,6 +67,23 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
             player = elimination.display_name
             week = elimination.week
             team = elimination.team_abbr
+
+            # Handle missed picks (no team selected)
+            if team is None:
+                graveyard.append({
+                    "player": player,
+                    "week": week,
+                    "team": "NO PICK",
+                    "opponent": "-",
+                    "location": "",
+                    "team_score": None,
+                    "opponent_score": None,
+                    "margin": None,
+                    "final_score": "MISSED DEADLINE",
+                    "game_summary": "⏰ No pick submitted",
+                    "elimination_date": None
+                })
+                continue
 
             # Determine if home or away
             if elimination.home_team == team:
