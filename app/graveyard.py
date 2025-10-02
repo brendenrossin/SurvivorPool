@@ -10,13 +10,13 @@ from typing import List, Dict, Any
 import os
 from app.mobile_plotly_config import render_mobile_chart
 
-def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
+def get_graveyard_data(db, current_season: int, league_id: int) -> List[Dict[str, Any]]:
     """
     Get data for eliminated players (the graveyard)
     Only shows the FIRST elimination for each player (the week they were actually eliminated)
     """
     from api.models import Pick, PickResult, Game, Player
-    from sqlalchemy import or_, func
+    from sqlalchemy import and_, func
 
     try:
         # First, find the earliest week each player was eliminated
@@ -27,8 +27,11 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
         ).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
-            Pick.season == current_season,
-            PickResult.survived == False
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id,
+                PickResult.survived == False
+            )
         ).group_by(Pick.player_id).subquery()
 
         # Now get the full elimination details for only the first elimination
@@ -56,8 +59,11 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
             (Game.week == Pick.week) &
             (Game.season == current_season)
         ).filter(
-            Pick.season == current_season,
-            PickResult.survived == False
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id,
+                PickResult.survived == False
+            )
         ).order_by(Pick.week, Player.display_name)
 
         eliminated = eliminated_query.all()
@@ -120,7 +126,7 @@ def get_graveyard_data(db, current_season: int) -> List[Dict[str, Any]]:
         st.error(f"Error fetching graveyard data: {e}")
         return []
 
-def render_graveyard_widget(db, current_season: int):
+def render_graveyard_widget(db, current_season: int, league_id: int):
     """
     Render the Graveyard Board widget
     """
@@ -128,7 +134,7 @@ def render_graveyard_widget(db, current_season: int):
     st.caption("Rest in peace, eliminated players")
 
     # Get graveyard data
-    graveyard_data = get_graveyard_data(db, current_season)
+    graveyard_data = get_graveyard_data(db, current_season, league_id)
 
     if not graveyard_data:
         st.info("⚰️ **The graveyard is empty... for now**\n\nEliminated players will appear here once they pick losing teams. May they rest in peace! 🪦")

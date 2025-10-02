@@ -349,7 +349,7 @@ def main():
         try:
             db = SessionLocal()
             try:
-                render_team_of_doom_widget(db, SEASON)
+                render_team_of_doom_widget(db, SEASON, league_id)
             finally:
                 try:
                     db.close()
@@ -362,7 +362,7 @@ def main():
         try:
             db = SessionLocal()
             try:
-                render_graveyard_widget(db, SEASON)
+                render_graveyard_widget(db, SEASON, league_id)
             finally:
                 try:
                     db.close()
@@ -375,7 +375,7 @@ def main():
         try:
             db = SessionLocal()
             try:
-                render_chaos_meter_widget(db, SEASON)
+                render_chaos_meter_widget(db, SEASON, league_id)
             finally:
                 try:
                     db.close()

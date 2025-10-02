@@ -10,38 +10,50 @@ from typing import Dict, Any
 import math
 from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 
-def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict[str, Any]:
+def calculate_elimination_percentage(db, current_season: int, week: int, league_id: int) -> Dict[str, Any]:
     """
     Calculate elimination percentage for a given week:
     Percentage = eliminations in this week / players that made it to this week
     """
     from api.models import Pick, PickResult, Player
+    from sqlalchemy import and_
 
     try:
         # Get total players who actually made picks in this season (not just in Player table)
+        # IMPORTANT: Filter by league_id to avoid double-counting across leagues
         total_original_players = db.query(Pick.player_id).filter(
-            Pick.season == current_season
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id
+            )
         ).distinct().count()
 
         # Get TOTAL unique players eliminated through this week (cumulative)
         total_eliminated = db.query(Pick.player_id).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
-            Pick.season == current_season,
-            Pick.week <= week,
-            PickResult.survived == False
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id,
+                Pick.week <= week,
+                PickResult.survived == False
+            )
         ).distinct().count()
 
         # Get TOTAL unique players eliminated before this week
         eliminated_before_week = db.query(Pick.player_id).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
-            Pick.season == current_season,
-            Pick.week < week,
-            PickResult.survived == False
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id,
+                Pick.week < week,
+                PickResult.survived == False
+            )
         ).distinct().count()
 
         # Calculate players eliminated THIS WEEK ONLY (new eliminations)
+        # IMPORTANT: Use subtraction to avoid double-counting players with multiple survived=False picks
         eliminated_this_week = total_eliminated - eliminated_before_week
 
         # Players that made it to this week (started minus eliminated before)
@@ -90,7 +102,7 @@ def get_elimination_level_description(elimination_percentage: float) -> tuple:
     else:
         return "😴 SAFE WEEK", "#D3D3D3"
 
-def render_chaos_meter_widget(db, current_season: int):
+def render_chaos_meter_widget(db, current_season: int, league_id: int):
     """
     Render the Elimination Tracker widget (formerly Chaos Meter)
     """
@@ -99,9 +111,13 @@ def render_chaos_meter_widget(db, current_season: int):
 
     # Get all weeks with picks (show current week even if no eliminations yet)
     from api.models import Game, Pick, PickResult
+    from sqlalchemy import and_
 
     weeks_query = db.query(Pick.week).filter(
-        Pick.season == current_season
+        and_(
+            Pick.season == current_season,
+            Pick.league_id == league_id
+        )
     ).distinct().order_by(Pick.week)
 
     available_weeks = [week.week for week in weeks_query.all()]
@@ -116,7 +132,7 @@ def render_chaos_meter_widget(db, current_season: int):
     with tab1:
         # Latest week elimination data
         current_week = max(available_weeks)
-        elimination_data = calculate_elimination_percentage(db, current_season, current_week)
+        elimination_data = calculate_elimination_percentage(db, current_season, current_week, league_id)
 
         col1, col2 = st.columns([2, 1])
 
@@ -174,7 +190,7 @@ def render_chaos_meter_widget(db, current_season: int):
         # Calculate elimination percentages for all weeks
         elimination_history = []
         for week in available_weeks:
-            week_data = calculate_elimination_percentage(db, current_season, week)
+            week_data = calculate_elimination_percentage(db, current_season, week, league_id)
             elimination_history.append({
                 "week": week,
                 "cumulative_percentage": week_data["cumulative_elimination_percentage"],

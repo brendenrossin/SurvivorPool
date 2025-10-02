@@ -11,11 +11,12 @@ from typing import List, Dict, Any
 import os
 from app.mobile_plotly_config import render_mobile_chart
 
-def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
+def get_team_of_doom_data(db, current_season: int, league_id: int) -> Dict[str, Any]:
     """
     Get data for Team of Doom analysis - teams that eliminated the most players
     """
     from api.models import Pick, PickResult, Game, Player
+    from sqlalchemy import and_
 
     try:
         # Get all picks that resulted in elimination (survived = False)
@@ -36,12 +37,15 @@ def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
         ).join(
             Player, Pick.player_id == Player.player_id
         ).filter(
-            Pick.season == current_season,
-            Game.season == current_season,
-            Game.week == Pick.week,
-            PickResult.survived == False,  # Only eliminated picks
-            Game.home_score.isnot(None),
-            Game.away_score.isnot(None)  # Only games with scores
+            and_(
+                Pick.season == current_season,
+                Pick.league_id == league_id,
+                Game.season == current_season,
+                Game.week == Pick.week,
+                PickResult.survived == False,  # Only eliminated picks
+                Game.home_score.isnot(None),
+                Game.away_score.isnot(None)  # Only games with scores
+            )
         )
 
         eliminated_picks = eliminated_picks_query.all()
@@ -144,7 +148,7 @@ def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
             "elimination_details": []
         }
 
-def render_team_of_doom_widget(db, current_season: int):
+def render_team_of_doom_widget(db, current_season: int, league_id: int):
     """
     Render the Team of Doom widget
     """
@@ -152,7 +156,7 @@ def render_team_of_doom_widget(db, current_season: int):
     st.caption("Teams that have eliminated the most players")
 
     # Get Team of Doom data
-    doom_data = get_team_of_doom_data(db, current_season)
+    doom_data = get_team_of_doom_data(db, current_season, league_id)
 
     if not doom_data["doom_teams"]:
         st.info("No eliminations yet this season!")
