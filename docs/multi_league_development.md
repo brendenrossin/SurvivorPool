@@ -53,6 +53,38 @@ league_commissioners (new)
 2. **League Isolation**: All queries filter by `league_id`
 3. **Hybrid Pick Sources**: Support both Google Sheets AND in-app picks
 4. **Multi-User Support**: One user can manage players across multiple leagues
+5. **URL-Based Routing**: Each league accessible via unique URL query param
+
+### **URL Routing Architecture**
+
+**How It Works:**
+- Each league is accessed via URL query parameter: `?league={slug}`
+- Examples:
+  - `https://app.com?league=rossin-family-2025`
+  - `https://app.com?league=test-league-alpha`
+- If no league param provided, auto-redirects to first available league
+- Invalid slugs show friendly error with list of available leagues
+
+**Benefits:**
+- **Shareable Links**: Commissioners can share league-specific URLs
+- **Bookmarkable**: Users can bookmark their league
+- **RESTful**: Each league is a distinct resource
+- **No Authentication Required (MVP)**: Works without login system
+- **SEO-Friendly**: Each league could have unique meta tags later
+- **Mobile-Friendly**: Easy to copy/paste links
+
+**Implementation Details:**
+```python
+# app/main.py
+league_slug = st.query_params.get("league", None)
+current_league = get_league_by_slug(league_slug, SEASON)
+league_id = current_league['league_id']
+```
+
+**Future Enhancements:**
+- Path-based routing: `/league/rossin-family-2025` (requires custom routing)
+- Custom domains: `rossin-family.survivorpool.app` (multi-tenant architecture)
+- Authentication-based: "My Leagues" page for logged-in users
 
 ---
 
@@ -539,36 +571,50 @@ git push origin staging
 - [x] Tested backward compatibility - all queries work with multi-league schema
 - [x] Pushed to dev environment for testing
 
-### **🚧 Phase 3 - UI Development (IN PROGRESS)**
+### **✅ Phase 3 - League Selection UI (COMPLETE)**
 
-- [ ] Build league selection UI (dropdown to switch between leagues)
-- [ ] Build league creation page
-- [ ] Build commissioner dashboard
-- [ ] Build invite link generation
+- [x] **URL-based league routing** - Each league has unique URL with query param
+  - Format: `?league=rossin-family-2025`
+  - Auto-redirect to first league if no param specified
+  - Error handling for invalid league slugs
+- [x] **League switcher sidebar** - Shows current league + links to others
+- [x] **Shareable links** - Each league can be shared via URL
+- [x] **Header updates** - Shows league name and slug
+- [x] **Database functions** - `get_league_by_slug()` for URL routing
+
+### **🚧 Phase 4 - League Creation & Management (TODO)**
+
+- [ ] Build league creation page (form to create new leagues)
+- [ ] Build commissioner dashboard (manage league settings)
+- [ ] Build invite code system (for joining leagues)
+- [ ] Add league editing capabilities
 
 ### **📋 Next Steps**
 
-1. **Verify Dev Deployment**
-   - Check Railway dev deployment logs
-   - Verify app starts successfully with multi-league schema
-   - Test dashboard functionality on dev URL
+1. **Test URL Routing on Dev** (Immediate)
+   - Access dev URL without params (should redirect to League 1)
+   - Access `?league=rossin-family-2025` (should show League 1 with 0 players)
+   - Access `?league=test-league-alpha` (should show League 2 with 5 players)
+   - Access `?league=invalid-slug` (should show error with league list)
+   - Test sidebar league switcher links
 
-2. **Build League Management UI**
-   - League selection dropdown in sidebar
-   - League creation page (form with name, slug, pick source)
-   - Commissioner dashboard (manage players, view stats)
-   - Invite code generation and display
+2. **Build League Creation Page** (Phase 4)
+   - Form to create new league (name, slug, pick source, season)
+   - Generate unique invite code automatically
+   - Validate league slug uniqueness
+   - Insert into database and redirect to new league
 
-3. **Build In-App Picks (Phase 4)**
-   - User authentication system
-   - Pick submission form
-   - Pick validation logic
-   - Pick locking when games start
+3. **Build Commissioner Dashboard** (Phase 4)
+   - View/edit league settings
+   - Display invite code for sharing
+   - Manage players (view, remove)
+   - League stats overview
 
-4. **Test Multi-League Functionality**
-   - Create second test league
-   - Verify data isolation between leagues
-   - Test league switching in UI
+4. **Build User Authentication** (Phase 5)
+   - Login/signup flow
+   - Link users to players across leagues
+   - "My Leagues" page showing all leagues user belongs to
+   - Commissioner role permissions
 
 ---
 
@@ -609,4 +655,4 @@ For questions or issues:
 ---
 
 **Last Updated:** 2025-10-01
-**Status:** Phase 2 - Query Layer Updates Complete ✅
+**Status:** Phase 3 - URL-Based League Routing Complete ✅
