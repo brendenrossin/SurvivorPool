@@ -84,25 +84,116 @@ Example:
 
 ## 6. Development Roadmap
 
-### Phase 1 – Public Showcase (2 weeks)
-- [ ] Refactor code to support **single league only**.  
-- [ ] Remove multi-league or “extra” features.  
-- [ ] Add documentation for setup.  
-- [ ] Apply AGPL license.  
-- [ ] Deploy demo on Streamlit Cloud.  
+### ✅ Phase 1 – Backend Infrastructure (COMPLETE)
+- [x] **Multi-league database schema** (leagues, users, user_players, league_commissioners tables)
+- [x] **Database migration system** (idempotent SQL migration + Python script)
+- [x] **Updated SQLAlchemy models** (League, User, UserPlayer, LeagueCommissioner)
+- [x] **Added league_id to existing tables** (players, picks)
+- [x] **Railway dev environment setup** (web-dev + postgres-dev services)
+- [x] **Migration deployed to dev** (League 1 created automatically)
 
-### Phase 2 – Private Product (4–6 weeks)
-- [ ] Add **multi-league support** (DB schema + tenant handling).  
-- [ ] Add **user accounts** (commissioner + player).  
-- [ ] Build premium visuals + commissioner tools.  
-- [ ] Package SaaS deployment (Dockerfile + Railway/Fly.io).  
-- [ ] Integrate **Stripe for payments**.  
+### ✅ Phase 2 – Query Layer & Backward Compatibility (COMPLETE)
+- [x] **Created DEFAULT_LEAGUE_ID constant** (backward compatibility with existing single-league)
+- [x] **Updated all database queries** to filter by league_id:
+  - [x] Dashboard data functions (summary, meme stats, player search)
+  - [x] Live scores widget
+  - [x] Main app queries
+  - [x] Score update jobs (ScoreUpdater class)
+  - [x] Sheets ingestion job
+- [x] **Tested backward compatibility** (all queries work with multi-league schema)
+- [x] **Auto-deploy to Railway dev** (feature/multi-league branch)
 
-### Phase 3 – Market Test (ongoing)
-- [ ] Post to Reddit to gauge interest.  
-- [ ] Launch landing page + email list.  
-- [ ] Invite beta testers.  
-- [ ] Refine pricing model.  
+### 🚧 Phase 3 – League Management UI (IN PROGRESS)
+- [ ] **League selection UI**:
+  - [ ] Add sidebar dropdown to select league
+  - [ ] Store selected league_id in session state
+  - [ ] Pass league_id to all dashboard functions
+  - [ ] Test switching between leagues
+- [ ] **League creation page**:
+  - [ ] Form to create new league (name, slug, pick source, season)
+  - [ ] Generate unique invite code
+  - [ ] Validate league slug uniqueness
+  - [ ] Insert into database
+- [ ] **Commissioner dashboard**:
+  - [ ] View league settings
+  - [ ] Display invite code
+  - [ ] Manage players (view, remove)
+  - [ ] League stats overview
+- [ ] **League list page** (view all leagues you manage)
+
+### 📋 Phase 4 – In-App Pick Submission (TODO)
+- [ ] **User authentication**:
+  - [ ] Login/signup flow
+  - [ ] Password hashing (bcrypt)
+  - [ ] Session management
+  - [ ] Magic link login (passwordless option)
+- [ ] **Pick submission**:
+  - [ ] Weekly pick form
+  - [ ] Team validation (no repeats, check previously used teams)
+  - [ ] Game lock enforcement (can't pick after kickoff)
+  - [ ] Pick confirmation/edit flow
+- [ ] **Player onboarding**:
+  - [ ] Join league via invite code
+  - [ ] Link user to player profile
+  - [ ] Commissioner can manually add players
+
+### 📋 Phase 5 – Premium Features & SaaS Differentiation (TODO)
+- [ ] **Custom branding**:
+  - [ ] League logo upload
+  - [ ] Custom color themes
+  - [ ] White-label options
+- [ ] **Advanced analytics**:
+  - [ ] Expected value (EV) calculator for picks
+  - [ ] Crowd wisdom insights (consensus vs outliers)
+  - [ ] Historical team performance
+  - [ ] Survivor odds calculator
+- [ ] **Social features**:
+  - [ ] League chat/banter board
+  - [ ] Trash talk comments
+  - [ ] Weekly power rankings
+- [ ] **Notifications**:
+  - [ ] Email pick reminders
+  - [ ] Elimination alerts
+  - [ ] Weekly recap emails
+- [ ] **Export tools**:
+  - [ ] PDF reports
+  - [ ] CSV exports
+  - [ ] Season summaries
+
+### 📋 Phase 6 – SaaS Infrastructure & Monetization (TODO)
+- [ ] **Payment integration**:
+  - [ ] Stripe setup
+  - [ ] Subscription tiers (Free, Pro, Premium)
+  - [ ] Payment flow
+- [ ] **Pricing implementation**:
+  - [ ] Free tier: 1 league, Google Sheets only
+  - [ ] Pro tier: $25-100/league (unlimited leagues, in-app picks)
+  - [ ] Premium tier: Custom branding, advanced analytics
+- [ ] **Landing page + marketing**:
+  - [ ] Product landing page
+  - [ ] Email collection for early access
+  - [ ] Feature comparison table
+  - [ ] Beta signup flow
+- [ ] **Beta testing program**:
+  - [ ] Recruit 5-10 commissioners
+  - [ ] Free first season for beta testers
+  - [ ] Feedback collection system
+
+### 📋 Phase 7 – Public Showcase Repo (TODO)
+- [ ] **Strip to single-league only** (fork current repo)
+- [ ] **Remove premium features** (keep basic dashboards only)
+- [ ] **Add comprehensive docs** (setup guide, architecture)
+- [ ] **Apply AGPL-3.0 license**
+- [ ] **Deploy public demo** (Streamlit Cloud or Railway free tier)
+- [ ] **Add attribution** (link to SaaS version in README)
+- [ ] **Post to Reddit** (r/fantasyfootball, r/nfl for validation)
+
+### 📋 Phase 8 – Market Test & Validation (TODO)
+- [ ] **Reddit validation post** (gauge interest, collect feedback)
+- [ ] **Launch beta waitlist** (collect emails)
+- [ ] **Invite first beta cohort** (5-10 commissioners)
+- [ ] **Iterate on feedback** (fix bugs, add requested features)
+- [ ] **Refine pricing model** (based on beta user willingness to pay)
 
 ---
 
