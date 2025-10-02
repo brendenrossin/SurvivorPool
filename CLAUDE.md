@@ -80,6 +80,26 @@ def get_team_color_map():
 
 ## 🚀 Railway Deployment (CRITICAL LESSONS)
 
+### Multi-Environment Setup
+- **Production** (`staging` branch): https://nfl-survivor-2025.up.railway.app/
+  - Database: `ballast.proxy.rlwy.net:35616` (production data)
+  - Auto-deploys on push to `staging`
+
+- **Dev** (`feature/multi-league` branch): https://web-dev-dev.up.railway.app/
+  - Database: `yamanote.proxy.rlwy.net:35600` (dev/test data)
+  - Auto-deploys on push to `feature/multi-league`
+  - Supports multi-league features with ?league=slug URL routing
+
+### Dev Database Migration
+Use `scripts/migrate_prod_to_dev_snapshot.py` to copy production data to dev:
+```bash
+export DATABASE_PUBLIC_URL="postgresql://postgres:...@ballast.proxy.rlwy.net:35616/railway"
+python scripts/migrate_prod_to_dev_snapshot.py
+# Migrates to dev League 1 (rossin-family-2025)
+# Production DB: READ ONLY (100% safe)
+# Dev DB: WRITE (inserts data)
+```
+
 ### ✅ Working Deployment Pattern
 ```dockerfile
 # Dockerfile with start.sh
@@ -214,6 +234,61 @@ finally:
 # Problem: App won't start on Railway
 # Solution: Revert to Dockerfile CMD approach, remove railway.json startCommand
 git log --oneline  # Find last working commit
+```
+
+### Multiple Elimination Records (CRITICAL BUG - FIXED)
+```python
+# Problem: Players with multiple survived=False picks across different weeks
+# Example: Player eliminated in Week 1, then missed pick in Week 2 = another survived=False
+# Impact: Double-counting eliminations, graveyard showing duplicates
+
+# Solution 1: Calculate cumulative eliminations first, then derive weekly by subtraction
+# (app/chaos_meter.py:24-57)
+total_eliminated = db.query(Pick.player_id).join(PickResult).filter(
+    Pick.week <= week, PickResult.survived == False
+).distinct().count()
+
+eliminated_before_week = db.query(Pick.player_id).join(PickResult).filter(
+    Pick.week < week, PickResult.survived == False
+).distinct().count()
+
+eliminated_this_week = total_eliminated - eliminated_before_week  # Avoids double-counting
+
+# Solution 2: Use subquery to find FIRST elimination week per player
+# (app/graveyard.py:24-67)
+first_elimination_week = db.query(
+    Pick.player_id,
+    func.min(Pick.week).label('elimination_week')
+).join(PickResult).filter(
+    PickResult.survived == False
+).group_by(Pick.player_id).subquery()
+
+# Then join to only show that first elimination
+eliminated_query = db.query(...).join(
+    first_elimination_week,
+    (Pick.player_id == first_elimination_week.c.player_id) &
+    (Pick.week == first_elimination_week.c.elimination_week)
+)
+```
+
+### Production Data Migration (NULL Handling Bug - FIXED)
+```python
+# Problem: When migrating data with bulk SQL inserts, Python None converts incorrectly
+# Bug: f"{'true' if value else 'false'}"  # None becomes 'false' instead of NULL!
+# Impact: Week 5 unscored games (survived=None) became survived=False, adding 57 fake eliminations
+
+# Solution: Explicitly check for None first
+f"{'NULL' if value is None else ('true' if value else 'false')}"
+
+# Example from scripts/migrate_prod_to_dev_snapshot.py:175
+pr_values = ', '.join([
+    f"({pr[0]}, "
+    f"{'NULL' if pr[1] is None else sq + pr[1] + sq}, "  # game_id
+    f"{'true' if pr[2] else 'false'}, "  # is_locked (always boolean)
+    f"{'true' if pr[3] else 'false'}, "  # is_valid (always boolean)
+    f"{'NULL' if pr[4] is None else ('true' if pr[4] else 'false')})"  # survived (can be NULL!)
+    for pr in pick_results
+])
 ```
 
 ## 🎮 Feature Development Guidelines

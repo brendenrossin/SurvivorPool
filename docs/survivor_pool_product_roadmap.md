@@ -122,9 +122,14 @@ Example:
 - [x] **Header updates**:
   - [x] League name in main title
   - [x] League slug in subtitle
-- [x] **Tested with 2 leagues**:
-  - [x] League 1: Rossin Family (0 players)
-  - [x] League 2: Test League Alpha (5 players)
+- [x] **Tested with production data on dev**:
+  - [x] League 1: Rossin Family (252 players, 125 eliminations)
+  - [x] Graveyard shows 125 unique players (no duplicates) ✅
+  - [x] Elimination tracker shows correct percentages ✅
+- [x] **Production data migration script**:
+  - [x] `scripts/migrate_prod_to_dev_snapshot.py` (bulk inserts, NULL handling)
+  - [x] Safely copies production → dev (read-only on prod)
+  - [x] Fixed NULL→false conversion bug for unscored games
 
 ### 🚧 Phase 4 – MVP League Management (TODO - REQUIRED FOR BETA)
 **Target**: Simple commissioner tools for beta testers

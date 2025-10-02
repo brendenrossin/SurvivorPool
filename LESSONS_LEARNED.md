@@ -122,6 +122,56 @@ ENVIRONMENT=railway
 
 ---
 
+## 🐛 Critical Bug Fixes (October 2025)
+
+### Elimination Double-Counting Bug
+**Problem**: Players with multiple `survived=False` picks were counted multiple times
+- Example: Player eliminated Week 1, then missed pick Week 2 → 2 survived=False records
+- Impact: Graveyard showed 205 entries instead of 125 unique players
+- Week 4 showed 110 eliminations instead of 43
+
+**Root Cause**: Direct query `COUNT(DISTINCT player_id) WHERE survived=False` counts same player twice
+
+**Solutions Implemented**:
+1. **Elimination Tracker** (app/chaos_meter.py:24-57):
+   ```python
+   # Calculate cumulative first, then derive weekly by subtraction
+   total_eliminated = db.query(Pick.player_id).join(PickResult).filter(
+       Pick.week <= week, PickResult.survived == False
+   ).distinct().count()
+
+   eliminated_this_week = total_eliminated - eliminated_before_week
+   ```
+
+2. **Graveyard Board** (app/graveyard.py:24-67):
+   ```python
+   # Use subquery to find FIRST elimination per player
+   first_elimination_week = db.query(
+       Pick.player_id,
+       func.min(Pick.week).label('elimination_week')
+   ).join(PickResult).filter(
+       PickResult.survived == False
+   ).group_by(Pick.player_id).subquery()
+   ```
+
+**Deployed**: Already on staging/production (commits e594a07, 4d2509e)
+
+### Migration Script NULL Handling Bug
+**Problem**: Bulk SQL inserts converted Python `None` to `false` instead of `NULL`
+- Bug: `f"{'true' if value else 'false'}"` → `None` evaluates as falsy → becomes `'false'`
+- Impact: Week 5 unscored games (survived=None) became survived=False, adding 57 fake eliminations
+- Dev showed 182 eliminations instead of 125
+
+**Solution** (scripts/migrate_prod_to_dev_snapshot.py:175):
+```python
+# Explicitly check for None FIRST
+f"{'NULL' if value is None else ('true' if value else 'false')}"
+```
+
+**Testing**: Always verify NULL values in production before migration
+
+---
+
 ## 🔄 Data Ingestion Strategy
 
 ### Working Approach:
