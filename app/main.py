@@ -32,7 +32,8 @@ from app.dashboard_data import (
     get_summary_data,
     get_player_data,
     get_meme_stats,
-    search_players
+    search_players,
+    get_all_leagues
 )
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
 from app.team_of_doom import render_team_of_doom_widget
@@ -51,6 +52,58 @@ SEASON = int(os.getenv("NFL_SEASON", 2025))
 team_data = load_team_data()
 
 def main():
+    # ========================================================================
+    # LEAGUE SELECTION (Multi-League Support)
+    # ========================================================================
+
+    # Initialize session state for selected league
+    if 'selected_league_id' not in st.session_state:
+        st.session_state.selected_league_id = DEFAULT_LEAGUE_ID
+
+    # Get all leagues for current season
+    all_leagues = get_all_leagues(SEASON)
+
+    # Only show league selector if there are multiple leagues
+    if len(all_leagues) > 1:
+        with st.sidebar:
+            st.markdown("### 🏈 League Selection")
+
+            # Create league options for selectbox
+            league_options = {
+                f"{league['league_name']} ({league['league_slug']})": league['league_id']
+                for league in all_leagues
+            }
+
+            # Find current selection
+            current_league_name = None
+            for league in all_leagues:
+                if league['league_id'] == st.session_state.selected_league_id:
+                    current_league_name = f"{league['league_name']} ({league['league_slug']})"
+                    break
+
+            # If current league not found, default to first league
+            if not current_league_name and league_options:
+                current_league_name = list(league_options.keys())[0]
+                st.session_state.selected_league_id = league_options[current_league_name]
+
+            # League selector dropdown
+            selected_league_name = st.selectbox(
+                "Select League:",
+                options=list(league_options.keys()),
+                index=list(league_options.keys()).index(current_league_name) if current_league_name in league_options else 0,
+                key="league_selector"
+            )
+
+            # Update session state if selection changed
+            new_league_id = league_options[selected_league_name]
+            if new_league_id != st.session_state.selected_league_id:
+                st.session_state.selected_league_id = new_league_id
+                st.rerun()  # Rerun to refresh data with new league
+
+            st.markdown("---")
+
+    # Use selected league ID for all queries
+    league_id = st.session_state.selected_league_id
 
     # Load Inter font and modern CSS styling
     st.markdown("""
@@ -148,7 +201,7 @@ def main():
         with col_right:
             # Last update chip
             try:
-                summary_preview = get_summary_data(SEASON)
+                summary_preview = get_summary_data(SEASON, league_id)
                 last_updates = summary_preview.get("last_updates", {})
                 ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")
                 if ts:
@@ -164,7 +217,7 @@ def main():
 
     # KPI Cards - modern at-a-glance stats
     try:
-        summary_preview = get_summary_data(SEASON)
+        summary_preview = get_summary_data(SEASON, league_id)
         with st.container():
             st.markdown("### Key Stats")
             k1, k2, k3 = st.columns(3)
@@ -221,8 +274,8 @@ def main():
 
     # Load data
     try:
-        summary = get_summary_data(SEASON)
-        meme_stats = get_meme_stats(SEASON)
+        summary = get_summary_data(SEASON, league_id)
+        meme_stats = get_meme_stats(SEASON, league_id)
         data_loaded = True
     except Exception as e:
         st.warning(f"⚠️ Database not fully populated yet: {e}")
@@ -598,14 +651,14 @@ def render_player_search():
 
     if search_query:
         # Search for matching players
-        matching_players = search_players(search_query)
+        matching_players = search_players(search_query, league_id)
 
         if matching_players:
             selected_player = st.selectbox("Select player:", matching_players)
 
             if selected_player:
                 # Get player data
-                player_data = get_player_data(selected_player, SEASON)
+                player_data = get_player_data(selected_player, SEASON, league_id)
 
                 if player_data:
                     st.write(f"**{selected_player}**")

@@ -349,3 +349,24 @@ def search_players(query: str, league_id: int = DEFAULT_LEAGUE_ID) -> List[str]:
 
     finally:
         db.close()
+
+@st.cache_data(ttl=60)  # 60 second cache for league list
+def get_all_leagues(season: int) -> List[Dict]:
+    """Get all leagues for a given season"""
+    from api.models import League
+
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        leagues = db.query(League).filter(League.season == season).order_by(League.league_name).all()
+
+        return [{
+            "league_id": league.league_id,
+            "league_name": league.league_name,
+            "league_slug": league.league_slug,
+            "pick_source": league.pick_source,
+            "commissioner_email": league.commissioner_email
+        } for league in leagues]
+
+    finally:
+        db.close()
