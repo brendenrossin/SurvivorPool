@@ -103,25 +103,41 @@ Example:
 - [x] **Tested backward compatibility** (all queries work with multi-league schema)
 - [x] **Auto-deploy to Railway dev** (feature/multi-league branch)
 
-### 🚧 Phase 3 – League Management UI (IN PROGRESS)
-- [ ] **League selection UI**:
-  - [ ] Add sidebar dropdown to select league
-  - [ ] Store selected league_id in session state
-  - [ ] Pass league_id to all dashboard functions
-  - [ ] Test switching between leagues
+### ✅ Phase 3 – URL-Based League Routing (COMPLETE)
+- [x] **URL routing implementation**:
+  - [x] Each league accessible via query param (?league=slug)
+  - [x] Auto-redirect to first league if no param specified
+  - [x] Error handling for invalid league slugs
+  - [x] `get_league_by_slug()` function for URL lookups
+- [x] **League switcher sidebar**:
+  - [x] Shows current league name and slug
+  - [x] Links to other available leagues
+  - [x] Shareable link box for each league
+- [x] **Header updates**:
+  - [x] League name in main title
+  - [x] League slug in subtitle
+- [x] **Tested with 2 leagues**:
+  - [x] League 1: Rossin Family (0 players)
+  - [x] League 2: Test League Alpha (5 players)
+
+### 🚧 Phase 4 – League Creation & Management (TODO)
 - [ ] **League creation page**:
   - [ ] Form to create new league (name, slug, pick source, season)
-  - [ ] Generate unique invite code
+  - [ ] Auto-generate unique invite code
   - [ ] Validate league slug uniqueness
-  - [ ] Insert into database
+  - [ ] Insert into database and redirect to new league URL
 - [ ] **Commissioner dashboard**:
-  - [ ] View league settings
-  - [ ] Display invite code
-  - [ ] Manage players (view, remove)
+  - [ ] View/edit league settings
+  - [ ] Display and regenerate invite code
+  - [ ] Manage players (add, remove, view)
   - [ ] League stats overview
-- [ ] **League list page** (view all leagues you manage)
+  - [ ] Export league data
+- [ ] **League discovery**:
+  - [ ] Public league list page (optional)
+  - [ ] Search leagues by name/slug
+  - [ ] Join league via invite code
 
-### 📋 Phase 4 – In-App Pick Submission (TODO)
+### 📋 Phase 5 – In-App Pick Submission (TODO)
 - [ ] **User authentication**:
   - [ ] Login/signup flow
   - [ ] Password hashing (bcrypt)
@@ -137,7 +153,7 @@ Example:
   - [ ] Link user to player profile
   - [ ] Commissioner can manually add players
 
-### 📋 Phase 5 – Premium Features & SaaS Differentiation (TODO)
+### 📋 Phase 6 – Premium Features & SaaS Differentiation (TODO)
 - [ ] **Custom branding**:
   - [ ] League logo upload
   - [ ] Custom color themes
@@ -160,7 +176,7 @@ Example:
   - [ ] CSV exports
   - [ ] Season summaries
 
-### 📋 Phase 6 – SaaS Infrastructure & Monetization (TODO)
+### 📋 Phase 7 – SaaS Infrastructure & Monetization (TODO)
 - [ ] **Payment integration**:
   - [ ] Stripe setup
   - [ ] Subscription tiers (Free, Pro, Premium)
@@ -179,7 +195,7 @@ Example:
   - [ ] Free first season for beta testers
   - [ ] Feedback collection system
 
-### 📋 Phase 7 – Public Showcase Repo (TODO)
+### 📋 Phase 8 – Public Showcase Repo (TODO)
 - [ ] **Strip to single-league only** (fork current repo)
 - [ ] **Remove premium features** (keep basic dashboards only)
 - [ ] **Add comprehensive docs** (setup guide, architecture)
@@ -188,7 +204,7 @@ Example:
 - [ ] **Add attribution** (link to SaaS version in README)
 - [ ] **Post to Reddit** (r/fantasyfootball, r/nfl for validation)
 
-### 📋 Phase 8 – Market Test & Validation (TODO)
+### 📋 Phase 9 – Market Test & Validation (TODO)
 - [ ] **Reddit validation post** (gauge interest, collect feedback)
 - [ ] **Launch beta waitlist** (collect emails)
 - [ ] **Invite first beta cohort** (5-10 commissioners)
