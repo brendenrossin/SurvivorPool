@@ -58,7 +58,8 @@ def main():
     # ========================================================================
 
     # Get league slug from URL query params (e.g., ?league=rossin-family-2025)
-    league_slug = st.query_params.get("league", None)
+    query_params = st.experimental_get_query_params()
+    league_slug = query_params.get("league", [None])[0]  # Returns list, get first item
 
     # If no league specified in URL, try to get default league
     if not league_slug:
@@ -69,7 +70,7 @@ def main():
             default_league = all_leagues[0]
             league_slug = default_league['league_slug']
             # Redirect to URL with league slug
-            st.query_params["league"] = league_slug
+            st.experimental_set_query_params(league=league_slug)
         else:
             # No leagues exist - show error
             st.error("🚫 No leagues found. Please contact your administrator.")
