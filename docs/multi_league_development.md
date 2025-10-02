@@ -589,6 +589,64 @@ git push origin staging
 - [ ] Build invite code system (for joining leagues)
 - [ ] Add league editing capabilities
 
+### **⚠️ Phase 5 - Authentication & League Privacy (CRITICAL)**
+
+**SECURITY REQUIREMENT:** Users should only see leagues they have access to!
+
+**Current State (MVP - Not Secure):**
+- ✅ URL routing works
+- ✅ Each league has isolated data
+- ❌ **Anyone with the URL can view any league** (not secure for production!)
+- ❌ Sidebar shows ALL leagues to everyone
+
+**Required Changes for Production:**
+- [ ] **User authentication system**:
+  - [ ] Login/signup flow
+  - [ ] Session management
+  - [ ] Password hashing
+- [ ] **League access control**:
+  - [ ] Only show leagues user belongs to in sidebar
+  - [ ] Check user permissions before loading league data
+  - [ ] Redirect unauthorized users with error message
+- [ ] **User-League association**:
+  - [ ] Use `user_players` junction table to determine league access
+  - [ ] Use `league_commissioners` table for admin permissions
+  - [ ] Query: "Get all leagues where user has a player OR is commissioner"
+- [ ] **Private league URLs**:
+  - [ ] Option 1: Require login to view any league
+  - [ ] Option 2: Public leagues (shareable) vs Private leagues (login required)
+  - [ ] Option 3: Invite-code gated access (no login, but need code)
+
+**Implementation Approach:**
+```python
+# Get leagues user has access to (after authentication)
+def get_user_leagues(user_id: int, season: int) -> List[Dict]:
+    # Get leagues where user is a player
+    player_leagues = db.query(League).join(Player).join(UserPlayer).filter(
+        UserPlayer.user_id == user_id,
+        League.season == season
+    ).all()
+
+    # Get leagues where user is commissioner
+    commissioner_leagues = db.query(League).join(LeagueCommissioner).filter(
+        LeagueCommissioner.user_id == user_id,
+        League.season == season
+    ).all()
+
+    return list(set(player_leagues + commissioner_leagues))
+```
+
+**Sidebar Changes:**
+```python
+# Only show leagues user has access to
+if user_authenticated:
+    user_leagues = get_user_leagues(current_user.user_id, SEASON)
+    # Show only user's leagues in sidebar
+else:
+    # No sidebar switcher for unauthenticated users
+    # Or require login to view dashboard
+```
+
 ### **📋 Next Steps**
 
 1. **Test URL Routing on Dev** (Immediate)
