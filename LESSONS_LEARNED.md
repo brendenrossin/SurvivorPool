@@ -176,4 +176,67 @@ When in doubt, compare current state to this working commit.
 
 ---
 
+## 🔑 Google OAuth Token Revocation (CRITICAL)
+
+### Problem
+**Date:** 2025-10-05
+**Symptom:** Sheets ingestion failing with `invalid_grant: Token has been expired or revoked`
+
+**Root Cause:**
+Google revokes OAuth refresh tokens if they're not used for extended periods (typically 6 months for production apps, shorter for apps in testing mode). Our access token expired and sat dormant without being refreshed, causing the refresh token to also be revoked.
+
+### Solution
+
+**Immediate Fix:**
+1. Delete old `token.json`: `rm -f token.json`
+2. Regenerate fresh credentials: `python scripts/testing/test_personal_sheets.py`
+3. Browser will open for re-authentication
+4. Encode for Railway: New token saved to `.credentials/.railway_oauth_token_FRESH.txt`
+5. Update Railway environment variable `GOOGLE_OAUTH_TOKEN_JSON` with fresh base64 token
+
+**Permanent Prevention:**
+Created proactive token refresh system:
+
+1. **Proactive Refresh Job** (`jobs/refresh_oauth_token.py`)
+   - Checks and refreshes OAuth token before expiry
+   - Saves refreshed tokens for Railway updates
+   - Returns error codes for monitoring
+
+2. **Integrated into Sheets Cron** (`cron/sheets_ingestion.py`)
+   - Step 1: Refresh OAuth token
+   - Step 2: Ingest sheets data
+   - Ensures token is fresh before every ingestion
+
+3. **Health Monitoring** (`jobs/monitor_oauth_health.py`)
+   - Monitors `job_meta` table for OAuth failures
+   - Alerts on authentication errors
+   - Tracks time since last successful ingestion
+
+### Key Learnings
+
+- ⚠️ **OAuth tokens need regular refresh** - don't let them sit dormant
+- 🔄 **Refresh before use** - always refresh token proactively before API calls
+- 📊 **Monitor job_meta** - watch for OAuth error patterns in job messages
+- 🚨 **Alert on failures** - catch token issues before they impact users
+- 🔧 **Manual Railway updates required** - Railway env vars can't be updated from within the app (security feature)
+
+### Testing Notes
+
+Local testing requires setting env var:
+```bash
+export GOOGLE_OAUTH_TOKEN_JSON="<base64_token>"
+python jobs/refresh_oauth_token.py
+```
+
+On Railway, env var is automatically available to cron jobs.
+
+### Deployment Status
+- ✅ Fresh OAuth token generated (2025-10-05)
+- ✅ Railway production env var updated
+- ✅ Proactive refresh added to sheets cron
+- ✅ Health monitoring script created
+- 📝 Documentation updated
+
+---
+
 *💡 Always update this document when learning new lessons or solving new deployment issues.*
