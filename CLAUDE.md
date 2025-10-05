@@ -277,6 +277,50 @@ print(f"Query result: {result}")
 - Check Railway logs for startup issues
 - Monitor `job_meta` table for update failures
 - Use `last_updates` timestamps in footer
+- **OAuth Health Check**: `python jobs/monitor_oauth_health.py`
+
+### OAuth Token Maintenance (CRITICAL)
+
+Google OAuth tokens require regular refresh to prevent revocation:
+
+**Automatic Refresh (Built-in):**
+- `api/oauth_manager.py` auto-refreshes tokens before API calls
+- `cron/sheets_ingestion.py` proactively refreshes before each run
+- Refreshed tokens saved to `.credentials/.railway_oauth_token_refreshed.txt`
+
+**Manual Token Regeneration (when fully revoked):**
+```bash
+# 1. Delete old token
+rm -f token.json
+
+# 2. Generate fresh credentials (opens browser)
+python scripts/testing/test_personal_sheets.py
+
+# 3. Encode for Railway
+# (Automatically saved to .credentials/.railway_oauth_token_FRESH.txt)
+
+# 4. Update Railway environment variable
+# Copy token from .railway_oauth_token_FRESH.txt
+# Railway Dashboard → Service → Variables → GOOGLE_OAUTH_TOKEN_JSON
+```
+
+**Monitoring OAuth Health:**
+```bash
+# Check for OAuth failures
+python jobs/monitor_oauth_health.py
+
+# Look for these alerts:
+# - "CRITICAL: OAuth authentication failure detected"
+# - "WARNING: Sheets ingestion hasn't run in 48+ hours"
+# - "CRITICAL: No successful ingestion in 72+ hours"
+```
+
+**OAuth Failure Response:**
+1. Check Railway logs for `invalid_grant` errors
+2. Run health monitor to confirm OAuth issue
+3. Regenerate token with test_personal_sheets.py
+4. Update Railway GOOGLE_OAUTH_TOKEN_JSON variable
+5. Verify next cron run succeeds
 
 ## 📚 Reference Commands
 
