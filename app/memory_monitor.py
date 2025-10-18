@@ -5,6 +5,7 @@ Memory monitoring utilities for tracking memory usage and potential leaks
 import os
 import gc
 import tracemalloc
+import logging
 import streamlit as st
 
 try:
@@ -50,7 +51,11 @@ def get_memory_snapshot():
         return rss, []
 
 def render_memory_panel():
-    """Render memory monitoring panel in sidebar"""
+    """Render memory monitoring panel in sidebar (only if ENABLE_MEMORY_MONITOR=true)"""
+    # Only show if explicitly enabled via environment variable
+    if os.getenv("ENABLE_MEMORY_MONITOR", "false").lower() != "true":
+        return
+
     if not PSUTIL_AVAILABLE:
         return
 
@@ -61,6 +66,9 @@ def render_memory_panel():
 
     if rss is not None:
         st.sidebar.metric("Process RSS", f"{rss} MB")
+
+        # Log RSS per render for tracking trends
+        logging.info(f"rss_mb={rss}")
 
     # Force GC button
     if st.sidebar.button("Force GC", help="Force garbage collection"):

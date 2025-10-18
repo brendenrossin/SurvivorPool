@@ -15,17 +15,18 @@ def setup_detailed_logging():
     # Create logs directory
     os.makedirs("logs", exist_ok=True)
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        handlers=[
-            logging.FileHandler('logs/startup.log'),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-
+    # Guard against duplicate handlers (prevents memory leak)
     logger = logging.getLogger("SurvivorPool")
+    if not logger.handlers:
+        # Configure logging only if not already configured
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            handlers=[
+                logging.FileHandler('logs/startup.log'),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
     logger.info("=" * 60)
     logger.info("🚀 SURVIVOR POOL STARTUP SEQUENCE")
     logger.info(f"📅 Timestamp: {datetime.now()}")
