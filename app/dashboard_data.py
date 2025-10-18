@@ -18,13 +18,13 @@ def get_db_session():
     """Get cached database session factory"""
     return SessionLocal
 
-@st.cache_data
+@st.cache_data(max_entries=1)  # Only one team map needed
 def load_team_data() -> Dict:
     """Load team colors and metadata"""
     with open("db/seed_team_map.json", "r") as f:
         return json.load(f)
 
-@st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
+@st.cache_data(ttl=60, max_entries=4)  # Cache last 4 seasons
 def get_summary_data(season: int) -> Dict:
     """Get summary data for dashboard"""
     SessionFactory = get_db_session()
@@ -122,7 +122,7 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
     finally:
         db.close()
 
-@st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
+@st.cache_data(ttl=60, max_entries=4)  # Cache last 4 seasons
 def get_meme_stats(season: int) -> Dict:
     """Get meme statistics for dashboard"""
     SessionFactory = get_db_session()
@@ -313,7 +313,7 @@ def get_meme_stats(season: int) -> Dict:
     finally:
         db.close()
 
-@st.cache_data(ttl=300)  # 5 minute cache for player searches
+@st.cache_data(ttl=300, max_entries=32)  # Cache 32 recent searches
 def search_players(query: str) -> List[str]:
     """Search for players by name"""
     SessionFactory = get_db_session()

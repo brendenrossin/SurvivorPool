@@ -16,3 +16,4 @@ plotly==5.17.0
 pandas==2.1.4
 schedule==1.2.0
 pytz==2024.1
+psutil==5.9.6

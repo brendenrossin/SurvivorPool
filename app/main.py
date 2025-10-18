@@ -40,6 +40,7 @@ from app.graveyard import render_graveyard_widget
 from app.chaos_meter import render_chaos_meter_widget
 from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 from app.odds_helpers import get_underdog_spread_text
+from app.memory_monitor import render_memory_panel
 
 # Load environment
 from dotenv import load_dotenv
@@ -754,6 +755,9 @@ def render_footer(last_updates):
 
     with col2:
         st.caption("*Survivor Pool Dashboard - Real-time NFL elimination tracking*")
+
+    # Memory monitoring panel (development/debugging)
+    render_memory_panel()
 
 if __name__ == "__main__":
     main()
