@@ -279,30 +279,35 @@ print(f"Query result: {result}")
 - Use `last_updates` timestamps in footer
 - **OAuth Health Check**: `python jobs/monitor_oauth_health.py`
 
-### OAuth Token Maintenance (CRITICAL)
+### OAuth Token Maintenance (AUTOMATIC ✨)
 
-Google OAuth tokens require regular refresh to prevent revocation:
+**How It Works:**
+Google OAuth uses TWO tokens:
+- **Access Token**: Short-lived (~1 hour) - used for API calls
+- **Refresh Token**: Long-lived (6+ months) - used to get new access tokens
 
-**Automatic Refresh (Built-in):**
-- `api/oauth_manager.py` auto-refreshes tokens before API calls
-- `cron/sheets_ingestion.py` proactively refreshes before each run
-- Refreshed tokens saved to `.credentials/.railway_oauth_token_refreshed.txt`
+Our system **automatically refreshes** access tokens using the refresh token:
+- `api/oauth_manager.py` detects expired access tokens
+- Automatically requests new access token using refresh_token
+- **No manual intervention needed!** 🎉
 
-**Manual Token Regeneration (when fully revoked):**
+**One-Time Setup (only when refresh token is revoked):**
 ```bash
 # 1. Delete old token
 rm -f token.json
 
-# 2. Generate fresh credentials (opens browser)
+# 2. Generate fresh credentials (opens browser for Google OAuth)
 python scripts/testing/test_personal_sheets.py
 
-# 3. Encode for Railway
-# (Automatically saved to .credentials/.railway_oauth_token_FRESH.txt)
+# 3. Token is automatically base64-encoded and saved to:
+#    .credentials/.railway_oauth_token_FRESH.txt
 
-# 4. Update Railway environment variable
-# Copy token from .railway_oauth_token_FRESH.txt
+# 4. Update Railway environment variable ONCE
 # Railway Dashboard → Service → Variables → GOOGLE_OAUTH_TOKEN_JSON
+# Copy token from .railway_oauth_token_FRESH.txt
 ```
+
+**After setup:** The system will automatically refresh for 6+ months!
 
 **Monitoring OAuth Health:**
 ```bash
@@ -315,12 +320,11 @@ python jobs/monitor_oauth_health.py
 # - "CRITICAL: No successful ingestion in 72+ hours"
 ```
 
-**OAuth Failure Response:**
-1. Check Railway logs for `invalid_grant` errors
-2. Run health monitor to confirm OAuth issue
-3. Regenerate token with test_personal_sheets.py
-4. Update Railway GOOGLE_OAUTH_TOKEN_JSON variable
-5. Verify next cron run succeeds
+**OAuth Failure Response (only if refresh token is revoked):**
+1. Check Railway logs for `invalid_grant` with "Token has been expired or revoked"
+2. If refresh_token is revoked, regenerate with test_personal_sheets.py
+3. Update Railway GOOGLE_OAUTH_TOKEN_JSON variable
+4. System will auto-refresh for another 6+ months
 
 ## 📚 Reference Commands
 
