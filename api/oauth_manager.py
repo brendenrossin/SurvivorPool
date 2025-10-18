@@ -52,9 +52,11 @@ class OAuthTokenManager:
             if not self.load_credentials():
                 return False
 
-        # Check if token needs refresh
-        if not self.creds.valid:
-            if self.creds.expired and self.creds.refresh_token:
+        # Always try to refresh if we have a refresh token
+        # This handles cases where access token is expired but refresh token is still valid
+        if self.creds.refresh_token:
+            # Check if token is expired or invalid
+            if not self.creds.valid or self.creds.expired:
                 try:
                     print("🔄 Access token expired, attempting refresh...")
                     self.creds.refresh(Request())
@@ -75,7 +77,9 @@ class OAuthTokenManager:
                 except Exception as e:
                     print(f"❌ Unexpected error during token refresh: {e}")
                     return False
-            else:
+        else:
+            # No refresh token available
+            if not self.creds.valid:
                 print("❌ Token invalid and no refresh token available")
                 return False
 
