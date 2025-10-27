@@ -25,19 +25,15 @@ def main():
     if success:
         print("✅ OAuth token is valid and fresh")
 
-        # If token was refreshed, save it for manual Railway update
+        # If token was refreshed, save it for automatic reuse
         if manager.token_updated:
-            print("🔑 Token was refreshed - updating saved credentials")
+            print("🔑 Token was refreshed - saving for next run")
             manager.save_refreshed_token_locally()
             print("")
-            print("⚠️  IMPORTANT: Token was refreshed!")
-            print("   The refreshed token has been saved locally, but Railway")
-            print("   environment variables are immutable from within the app.")
+            print("🎉 Auto-refresh successful!")
+            print("   Next cron run will automatically use the refreshed token.")
+            print("   No manual Railway update needed!")
             print("")
-            print("   📋 TODO: Update Railway GOOGLE_OAUTH_TOKEN_JSON variable")
-            print("      with the new token from .credentials/.railway_oauth_token_refreshed.txt")
-            print("")
-            print("   This is a manual step to prevent unauthorized credential updates.")
 
         return True
     else:
