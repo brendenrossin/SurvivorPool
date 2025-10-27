@@ -20,12 +20,31 @@ class OAuthTokenManager:
         self.token_updated = False
 
     def load_credentials(self) -> bool:
-        """Load credentials from environment variable"""
+        """Load credentials from refreshed file (priority) or environment variable"""
         try:
-            token_json = os.getenv('GOOGLE_OAUTH_TOKEN_JSON')
+            token_json = None
+            token_source = None
+
+            # PRIORITY 1: Check for previously refreshed token file
+            # This allows auto-refresh to persist across Railway cron runs
+            refreshed_token_path = '.credentials/.railway_oauth_token_refreshed.txt'
+            if os.path.exists(refreshed_token_path):
+                try:
+                    with open(refreshed_token_path, 'r') as f:
+                        token_json = f.read().strip()
+                        token_source = "refreshed file"
+                        print("🔄 Using previously refreshed OAuth token from file")
+                except Exception as e:
+                    print(f"⚠️ Failed to read refreshed token file: {e}")
+                    # Fall through to environment variable
+
+            # PRIORITY 2: Fall back to environment variable
             if not token_json:
-                print("❌ No GOOGLE_OAUTH_TOKEN_JSON environment variable found")
-                return False
+                token_json = os.getenv('GOOGLE_OAUTH_TOKEN_JSON')
+                token_source = "environment variable"
+                if not token_json:
+                    print("❌ No GOOGLE_OAUTH_TOKEN_JSON environment variable found")
+                    return False
 
             # Handle both base64 and plain JSON formats
             try:
@@ -39,7 +58,7 @@ class OAuthTokenManager:
 
             # Create credentials object
             self.creds = Credentials.from_authorized_user_info(token_data)
-            print("✅ OAuth credentials loaded successfully")
+            print(f"✅ OAuth credentials loaded successfully from {token_source}")
             return True
 
         except Exception as e:
@@ -124,11 +143,15 @@ class OAuthTokenManager:
         try:
             refreshed_token = self.get_updated_token_for_railway()
 
+            # Ensure .credentials directory exists
+            os.makedirs('.credentials', exist_ok=True)
+
             with open('.credentials/.railway_oauth_token_refreshed.txt', 'w') as f:
                 f.write(refreshed_token)
 
             print("💾 Refreshed token saved to .credentials/.railway_oauth_token_refreshed.txt")
-            print("🔄 Update Railway GOOGLE_OAUTH_TOKEN_JSON with this new value")
+            print("✅ Auto-refresh enabled! Next cron run will use this token automatically")
+            print("   (No manual Railway update needed unless refresh token expires)")
 
         except Exception as e:
             print(f"⚠️ Failed to save refreshed token: {e}")
