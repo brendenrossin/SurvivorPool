@@ -37,6 +37,7 @@ from app.dashboard_data import (
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
+from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
 from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 from app.odds_helpers import get_underdog_spread_text
@@ -268,7 +269,7 @@ def main():
     st.markdown("### 📊 Pool Insights")
 
     # Create tabs for Pool Insights features
-    tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Elimination Tracker"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Team of Doom", "Survivors", "Graveyard", "Elimination Tracker"])
 
     with tab1:
         try:
@@ -287,6 +288,19 @@ def main():
         try:
             db = SessionLocal()
             try:
+                render_survivors_widget(db, SEASON)
+            finally:
+                try:
+                    db.close()
+                except:
+                    pass
+        except Exception as e:
+            st.info("✨ Survivors will appear once picks are made!")
+
+    with tab3:
+        try:
+            db = SessionLocal()
+            try:
                 render_graveyard_widget(db, SEASON)
             finally:
                 try:
@@ -296,7 +310,7 @@ def main():
         except Exception as e:
             st.info("⚰️ Graveyard will fill up as players get eliminated!")
 
-    with tab3:
+    with tab4:
         try:
             db = SessionLocal()
             try:
