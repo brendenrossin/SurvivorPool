@@ -10,7 +10,7 @@ from typing import List, Dict, Any
 import os
 from app.mobile_plotly_config import render_mobile_chart
 
-def get_survivors_data(db, current_season: int) -> List[Dict[str, Any]]:
+def get_survivors_data(db, current_season: int, current_week: int = None) -> List[Dict[str, Any]]:
     """
     Get data for surviving players (players not yet eliminated)
     """
@@ -45,7 +45,8 @@ def get_survivors_data(db, current_season: int) -> List[Dict[str, Any]]:
             picks = db.query(
                 Pick.week,
                 Pick.team_abbr,
-                PickResult.survived
+                PickResult.survived,
+                PickResult.game_id
             ).join(
                 PickResult, Pick.pick_id == PickResult.pick_id
             ).filter(
@@ -65,6 +66,13 @@ def get_survivors_data(db, current_season: int) -> List[Dict[str, Any]]:
             latest_team = latest_pick.team_abbr if latest_pick else "N/A"
             latest_status = "✅ Won" if latest_pick and latest_pick.survived == True else ("⏳ Pending" if latest_pick and latest_pick.survived is None else "N/A")
 
+            # Check if this week's game has started (for "left to play" metric)
+            game_started = False
+            if current_week and latest_pick and latest_pick.week == current_week and latest_pick.game_id:
+                game = db.query(Game).filter(Game.game_id == latest_pick.game_id).first()
+                if game and game.status in ['live', 'final']:
+                    game_started = True
+
             survivors_data.append({
                 "player": player_name,
                 "total_picks": total_picks,
@@ -73,7 +81,9 @@ def get_survivors_data(db, current_season: int) -> List[Dict[str, Any]]:
                 "teams_used": teams_used,
                 "latest_week": latest_week,
                 "latest_team": latest_team,
-                "latest_status": latest_status
+                "latest_status": latest_status,
+                "game_started": game_started,
+                "current_week_pick": latest_pick.week == current_week if latest_pick else False
             })
 
         return survivors_data
@@ -86,11 +96,19 @@ def render_survivors_widget(db, current_season: int):
     """
     Render the Survivors Board widget
     """
+    from api.models import Game
+
     st.subheader("✨ Survivors Board")
     st.caption("Players still in the hunt for glory")
 
-    # Get survivors data
-    survivors_data = get_survivors_data(db, current_season)
+    # Find the current/latest week with games
+    latest_week_result = db.query(Game.week).filter(
+        Game.season == current_season
+    ).order_by(Game.week.desc()).first()
+    current_week = latest_week_result.week if latest_week_result else 1
+
+    # Get survivors data with current week info
+    survivors_data = get_survivors_data(db, current_season, current_week)
 
     if not survivors_data:
         st.info("🎉 **No survivors remain!**\n\nAll players have been eliminated. The pool is complete!")
@@ -99,6 +117,10 @@ def render_survivors_widget(db, current_season: int):
     # Create DataFrame for display
     df = pd.DataFrame(survivors_data)
 
+    # Calculate "left to play" - survivors whose current week game hasn't started yet
+    left_to_play = sum(1 for row in survivors_data
+                       if row['current_week_pick'] and not row['game_started'])
+
     # Summary stats
     col1, col2, col3 = st.columns(3)
 
@@ -106,13 +128,11 @@ def render_survivors_widget(db, current_season: int):
         st.metric("🏆 Survivors Remaining", len(df))
 
     with col2:
-        avg_wins = df["wins"].mean() if not df.empty else 0
-        st.metric("📊 Avg Wins", f"{avg_wins:.1f}")
+        st.metric("⏳ Left to Play", left_to_play)
 
     with col3:
-        if not df.empty:
-            most_teams = df["total_picks"].max()
-            st.metric("🎯 Most Picks Made", most_teams)
+        # Show current week
+        st.metric("📅 Current Week", f"Week {current_week}")
 
     st.divider()
 
