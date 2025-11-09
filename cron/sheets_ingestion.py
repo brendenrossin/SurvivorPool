@@ -20,25 +20,12 @@ def main():
         # Get the project root directory
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-        # Step 1: Proactively refresh OAuth token before ingestion
-        print("🔑 Step 1: Refreshing OAuth token...")
-        oauth_refresh_path = os.path.join(project_root, "jobs", "refresh_oauth_token.py")
-        refresh_result = subprocess.run([
-            sys.executable,
-            oauth_refresh_path
-        ], capture_output=True, text=True, timeout=30, cwd=project_root)
+        # Note: No OAuth token refresh needed - using service account!
+        print("🔑 Using service account (no OAuth token refresh needed)")
 
-        print(refresh_result.stdout)
-        if refresh_result.stderr:
-            print("OAuth refresh warnings:", refresh_result.stderr)
-
-        if refresh_result.returncode != 0:
-            print("⚠️  OAuth token refresh failed - attempting ingestion anyway")
-            print("   Ingestion may fail if token is expired")
-
-        # Step 2: Run sheets ingestion
-        print("\n📊 Step 2: Ingesting picks from Google Sheets...")
-        script_path = os.path.join(project_root, "jobs", "ingest_personal_sheets.py")
+        # Step 2: Run sheets ingestion (using service account)
+        print("\n📊 Step 2: Ingesting picks from Google Sheets (service account)...")
+        script_path = os.path.join(project_root, "jobs", "ingest_sheet.py")
 
         # Run the sheets ingestion script directly
         result = subprocess.run([
