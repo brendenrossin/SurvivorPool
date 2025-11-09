@@ -1,229 +1,226 @@
 #!/usr/bin/env python3
 """
-Sheet ingestion job - pulls picks from Google Sheets and updates database
+Ingest survivor picks from Google Sheets using service account credentials
+This uses the EXACT same logic as ingest_personal_sheets.py (OAuth version)
+Only difference: uses service account client instead of OAuth client
 """
 
 import os
 import sys
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from api.database import SessionLocal, engine
-from api.models import Player, Pick, PickResult, Game, JobMeta
+from api.database import SessionLocal
+from api.models import Player, Pick, PickResult
 from api.sheets import GoogleSheetsClient
 from dotenv import load_dotenv
+from sqlalchemy import text
 
-load_dotenv()
+def parse_picks_data(raw_data):
+    """Parse raw Google Sheets data into player picks
 
-class SheetIngestor:
-    def __init__(self):
-        self.sheets_client = GoogleSheetsClient()
-        self.season = int(os.getenv("NFL_SEASON", 2025))
+    Converts raw sheet rows into: {player_name: {week: team}}
+    This matches the OAuth version's data structure exactly
+    """
+    print("🧮 Parsing Google Sheets data...")
 
-    def run(self):
-        """Main ingestion process"""
-        db = SessionLocal()
+    if not raw_data or len(raw_data) < 2:
+        print("⚠️ No data to parse")
+        return {}
+
+    players_data = {}
+
+    # First row is header
+    header = raw_data[0]
+    rows = raw_data[1:]
+
+    # Find week columns
+    week_columns = []
+    for i, col_name in enumerate(header):
+        if col_name and col_name.startswith('Week ') and col_name.replace('Week ', '').isdigit():
+            week_num = int(col_name.replace('Week ', ''))
+            week_columns.append((i, week_num))
+
+    print(f"   Found {len(week_columns)} week columns")
+
+    # Parse each row
+    for row_idx, row in enumerate(rows):
         try:
-            print(f"Starting sheet ingestion at {datetime.now(timezone.utc)}")
-
-            # Update job meta
-            self.update_job_meta(db, "ingest_sheet", "running", "Starting ingestion")
-
-            # Fetch data from sheets
-            raw_data = self.sheets_client.get_picks_data()
-            print(f"📊 Fetched {len(raw_data)} rows from Sheet")
-            print(f"📋 Header: {raw_data[0][:8] if raw_data else 'No data'}...")
-
-            parsed_data = self.sheets_client.parse_picks_data(raw_data)
-            print(f"👥 Parsed {len(parsed_data['players'])} players")
-            print(f"📊 Parsed {len(parsed_data['picks'])} picks")
-
-            if len(parsed_data['picks']) > 0:
-                print(f"   Sample pick: {parsed_data['picks'][0]}")
-            else:
-                print(f"   ⚠️ WARNING: No picks parsed!")
-
-            # Process players and picks
-            players_created = self.upsert_players(db, parsed_data["players"])
-
-            # CRITICAL: Flush players to DB so they're queryable in upsert_picks
-            db.flush()
-            print(f"   💾 Flushed {players_created} new players to database")
-
-            picks_updated = self.upsert_picks(db, parsed_data["picks"])
-
-            # Skip validation - commissioner's sheet is source of truth
-            validation_updates = 0
-
-            db.commit()
-
-            message = f"Processed {len(parsed_data['players'])} players, {picks_updated} picks, {validation_updates} validations"
-            self.update_job_meta(db, "ingest_sheet", "success", message)
-
-            print(f"Sheet ingestion completed: {message}")
-
-        except Exception as e:
-            db.rollback()
-            import traceback
-            print("=== FULL TRACEBACK ===")
-            traceback.print_exc()
-            print("=== END TRACEBACK ===")
-            error_msg = f"Error during sheet ingestion: {str(e)}"
-            self.update_job_meta(db, "ingest_sheet", "error", error_msg)
-            print(error_msg)
-            print("⚠️  Continuing despite sheet ingestion error (likely permissions)")
-            return False  # Don't raise, just return False
-        finally:
-            db.close()
-
-    def upsert_players(self, db: Session, player_names: list) -> int:
-        """Create or update players"""
-        created_count = 0
-        for name in player_names:
-            existing = db.query(Player).filter(Player.display_name == name).first()
-            if not existing:
-                player = Player(display_name=name)
-                db.add(player)
-                created_count += 1
-
-        return created_count
-
-    def upsert_picks(self, db: Session, picks_data: list) -> int:
-        """Create or update picks, respecting lock status"""
-        updated_count = 0
-        skipped_no_player = 0
-
-        for pick_data in picks_data:
-            player = db.query(Player).filter(
-                Player.display_name == pick_data["player_name"]
-            ).first()
-
-            if not player:
-                skipped_no_player += 1
+            # Get player name (first column)
+            if not row or len(row) == 0:
                 continue
 
-            # Check if pick exists
-            existing_pick = db.query(Pick).filter(
-                and_(
+            name = row[0].strip() if row[0] else ''
+            if not name:
+                continue
+
+            # Initialize player if not seen
+            if name not in players_data:
+                players_data[name] = {}
+
+            # Parse weekly picks
+            for col_idx, week_num in week_columns:
+                if col_idx < len(row):
+                    team = row[col_idx].strip().upper() if row[col_idx] else ''
+                    if team and team != '':
+                        players_data[name][week_num] = team
+
+        except Exception as e:
+            print(f"⚠️ Error parsing row {row_idx + 2}: {e}")
+            continue
+
+    print(f"✅ Parsed {len(players_data)} players from Google Sheets")
+    return players_data
+
+def ingest_players_and_picks(players_data):
+    """Insert/update players and picks in database
+
+    EXACT same logic as ingest_personal_sheets.py
+    """
+    db = SessionLocal()
+
+    try:
+        print("👥 Ingesting players and picks...")
+
+        season = int(os.getenv('NFL_SEASON', 2025))
+
+        # Clear existing picks and players - we'll recalculate pick_results from current games
+        print("🧹 Clearing existing pick and player data...")
+
+        # Delete picks and players (this cascades to pick_results)
+        db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
+        db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
+        db.commit()
+        print("✅ Existing data cleared")
+
+        players_created = 0
+        picks_created = 0
+        picks_updated = 0
+
+        for player_name, weekly_picks in players_data.items():
+            # Get or create player
+            player = db.query(Player).filter(Player.display_name == player_name).first()
+
+            if not player:
+                player = Player(display_name=player_name)
+                db.add(player)
+                db.flush()  # Get ID
+                players_created += 1
+                print(f"   ➕ Created player: {player_name}")
+
+            # Process weekly picks
+            for week, team in weekly_picks.items():
+                # Check if pick already exists
+                existing_pick = db.query(Pick).filter(
                     Pick.player_id == player.player_id,
-                    Pick.season == self.season,
-                    Pick.week == pick_data["week"]
-                )
-            ).first()
-
-            if existing_pick:
-                # Commissioner's sheet is source of truth - always update
-                if existing_pick.team_abbr != pick_data["team_abbr"]:
-                    existing_pick.team_abbr = pick_data["team_abbr"]
-                    existing_pick.source = "google_sheets"  # Update source
-                    existing_pick.picked_at = datetime.now(timezone.utc)
-                    updated_count += 1
-            else:
-                # Create new pick
-                new_pick = Pick(
-                    player_id=player.player_id,
-                    season=self.season,
-                    week=pick_data["week"],
-                    team_abbr=pick_data["team_abbr"]
-                )
-                db.add(new_pick)
-                updated_count += 1
-
-        if skipped_no_player > 0:
-            print(f"   ⚠️ Skipped {skipped_no_player} picks (player not found)")
-
-        return updated_count
-
-    def validate_picks(self, db: Session) -> int:
-        """Validate picks for duplicate team usage and create/update pick_results"""
-        updated_count = 0
-
-        # Get all picks for current season
-        picks = db.query(Pick).filter(Pick.season == self.season).all()
-
-        for pick in picks:
-            # Ensure pick_result exists
-            pick_result = db.query(PickResult).filter(
-                PickResult.pick_id == pick.pick_id
-            ).first()
-
-            if not pick_result:
-                pick_result = PickResult(pick_id=pick.pick_id)
-                db.add(pick_result)
-
-            # Check for duplicate team usage by this player in this season
-            duplicate_picks = db.query(Pick).filter(
-                and_(
-                    Pick.player_id == pick.player_id,
-                    Pick.season == pick.season,
-                    Pick.team_abbr == pick.team_abbr,
-                    Pick.team_abbr.isnot(None),
-                    Pick.pick_id != pick.pick_id
-                )
-            ).count()
-
-            # Update validity
-            old_valid = pick_result.is_valid
-            pick_result.is_valid = (duplicate_picks == 0)
-
-            if old_valid != pick_result.is_valid:
-                updated_count += 1
-
-            # Try to link to game
-            if pick.team_abbr:
-                game = db.query(Game).filter(
-                    and_(
-                        Game.season == pick.season,
-                        Game.week == pick.week,
-                        ((Game.home_team == pick.team_abbr) | (Game.away_team == pick.team_abbr))
-                    )
+                    Pick.season == season,
+                    Pick.week == week
                 ).first()
 
-                if game:
-                    pick_result.game_id = game.game_id
+                if existing_pick:
+                    # Update if team changed
+                    if existing_pick.team_abbr != team:
+                        print(f"   🔄 Updating {player_name} Week {week}: {existing_pick.team_abbr} → {team}")
+                        existing_pick.team_abbr = team
+                        picks_updated += 1
+                else:
+                    # Create new pick
+                    new_pick = Pick(
+                        player_id=player.player_id,
+                        season=season,
+                        week=week,
+                        team_abbr=team,
+                        source="google_sheets"
+                    )
+                    db.add(new_pick)
+                    picks_created += 1
 
-                    # Check if game has started (lock logic)
-                    now = datetime.now(timezone.utc)
-                    # Ensure game.kickoff is timezone-aware for comparison
-                    game_kickoff = game.kickoff
-                    if game_kickoff.tzinfo is None:
-                        game_kickoff = game_kickoff.replace(tzinfo=timezone.utc)
+        # Re-calculate ALL elimination results using shared helper
+        # This ensures consistency with app startup and cron jobs
+        print("🔄 Re-calculating elimination results from current game data...")
+        try:
+            # Use SHARED HELPER to ensure consistency
+            from jobs.update_scores import ScoreUpdater
 
-                    if now >= game_kickoff and not pick_result.is_locked:
-                        pick_result.is_locked = True
-                        updated_count += 1
+            updater = ScoreUpdater()
 
-                    # Update survival status if game is final
-                    if game.status == "final" and game.winner_abbr:
-                        old_survived = pick_result.survived
-                        pick_result.survived = (pick.team_abbr == game.winner_abbr)
+            # Process ALL elimination logic (picks, stuck games, missing picks)
+            elimination_results = updater.process_all_eliminations(db)
 
-                        if old_survived != pick_result.survived:
-                            updated_count += 1
-
-        return updated_count
-
-    def update_job_meta(self, db: Session, job_name: str, status: str, message: str):
-        """Update job metadata"""
-        job_meta = db.query(JobMeta).filter(JobMeta.job_name == job_name).first()
-
-        if not job_meta:
-            job_meta = JobMeta(job_name=job_name)
-            db.add(job_meta)
-
-        job_meta.last_run_at = datetime.now(timezone.utc)
-        job_meta.status = status
-        job_meta.message = message
-
-        if status == "success":
-            job_meta.last_success_at = datetime.now(timezone.utc)
+            print(f"   ✅ Elimination processing complete:")
+            print(f"      - Pick results: {elimination_results['picks_updated']}")
+            print(f"      - Stuck games fixed: {elimination_results['stuck_games_fixed']}")
+            print(f"      - Missing pick eliminations: {elimination_results['missing_pick_eliminations']}")
+        except Exception as e:
+            print(f"   ⚠️ Failed to process eliminations: {e}")
+            import traceback
+            traceback.print_exc()
 
         db.commit()
 
+        print(f"✅ Ingestion complete!")
+        print(f"   Players created: {players_created}")
+        print(f"   Picks created: {picks_created}")
+        print(f"   Picks updated: {picks_updated}")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Database ingestion failed: {e}")
+        db.rollback()
+        import traceback
+        traceback.print_exc()
+        return False
+
+    finally:
+        db.close()
+
+def main():
+    """Main ingestion process"""
+    print("📊 Service Account Google Sheets Ingestion")
+    print("=" * 50)
+
+    # Load environment
+    load_dotenv()
+
+    # Create client and get data
+    client = GoogleSheetsClient()
+    raw_data = client.get_picks_data()
+
+    if not raw_data:
+        print("⚠️ No data retrieved from Google Sheets (check service account)")
+        return True  # Don't fail deployment, just skip ingestion
+
+    # Parse the data
+    players_data = parse_picks_data(raw_data)
+
+    if not players_data:
+        print("⚠️ No valid picks data parsed")
+        return True  # Don't fail deployment
+
+    # Ingest into database
+    success = ingest_players_and_picks(players_data)
+
+    if success:
+        print("\n🎉 Service account ingestion successful!")
+        print("🚀 Your dashboard should now show real survivor picks!")
+
+        # After successful ingestion, populate historical eliminations
+        print("\n🔄 Populating historical elimination data...")
+        try:
+            from manual_historical import mark_eliminations
+            mark_eliminations()
+            print("✅ Historical eliminations populated")
+        except Exception as e:
+            print(f"⚠️ Historical elimination population failed: {e}")
+    else:
+        print("\n❌ Service account ingestion failed")
+
+    return success
+
 if __name__ == "__main__":
-    ingestor = SheetIngestor()
-    ingestor.run()
+    import sys
+    success = main()
+    sys.exit(0 if success else 1)
