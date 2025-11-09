@@ -49,6 +49,11 @@ class SheetIngestor:
 
             # Process players and picks
             players_created = self.upsert_players(db, parsed_data["players"])
+
+            # CRITICAL: Flush players to DB so they're queryable in upsert_picks
+            db.flush()
+            print(f"   💾 Flushed {players_created} new players to database")
+
             picks_updated = self.upsert_picks(db, parsed_data["picks"])
 
             # Skip validation - commissioner's sheet is source of truth
