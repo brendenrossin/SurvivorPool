@@ -2,6 +2,7 @@
 """
 OAuth Token Manager with Auto-Refresh
 Handles Google OAuth tokens with automatic refresh capability
+Persists refreshed tokens to PostgreSQL to survive Railway container restarts
 """
 
 import os
@@ -11,6 +12,7 @@ from datetime import datetime, timezone
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google.auth.exceptions import RefreshError
+from sqlalchemy.orm import Session
 
 class OAuthTokenManager:
     """Manages OAuth tokens with auto-refresh"""
@@ -20,23 +22,29 @@ class OAuthTokenManager:
         self.token_updated = False
 
     def load_credentials(self) -> bool:
-        """Load credentials from refreshed file (priority) or environment variable"""
+        """Load credentials from database (priority) or environment variable"""
         try:
             token_json = None
             token_source = None
 
-            # PRIORITY 1: Check for previously refreshed token file
-            # This allows auto-refresh to persist across Railway cron runs
-            refreshed_token_path = '.credentials/.railway_oauth_token_refreshed.txt'
-            if os.path.exists(refreshed_token_path):
+            # PRIORITY 1: Check database for previously refreshed token
+            # This persists across Railway container restarts (unlike files)
+            try:
+                from api.database import SessionLocal
+                from api.models import JobMeta
+
+                db = SessionLocal()
                 try:
-                    with open(refreshed_token_path, 'r') as f:
-                        token_json = f.read().strip()
-                        token_source = "refreshed file"
-                        print("🔄 Using previously refreshed OAuth token from file")
-                except Exception as e:
-                    print(f"⚠️ Failed to read refreshed token file: {e}")
-                    # Fall through to environment variable
+                    job_meta = db.query(JobMeta).filter(JobMeta.job_name == 'oauth_token').first()
+                    if job_meta and job_meta.message:
+                        token_json = job_meta.message
+                        token_source = "database (persisted)"
+                        print("🔄 Using previously refreshed OAuth token from database")
+                finally:
+                    db.close()
+            except Exception as e:
+                print(f"⚠️ Failed to read token from database: {e}")
+                # Fall through to environment variable
 
             # PRIORITY 2: Fall back to environment variable
             if not token_json:
@@ -135,26 +143,45 @@ class OAuthTokenManager:
         token_json = json.dumps(token_data)
         return base64.b64encode(token_json.encode()).decode()
 
-    def save_refreshed_token_locally(self):
-        """Save refreshed token to local file for Railway update"""
+    def save_refreshed_token_to_database(self):
+        """Save refreshed token to database (persists across Railway restarts)"""
         if not self.token_updated or not self.creds:
             return
 
         try:
+            from api.database import SessionLocal
+            from api.models import JobMeta
+            from datetime import datetime, timezone
+
             refreshed_token = self.get_updated_token_for_railway()
 
-            # Ensure .credentials directory exists
-            os.makedirs('.credentials', exist_ok=True)
+            db = SessionLocal()
+            try:
+                # Upsert the refreshed token to database
+                job_meta = db.query(JobMeta).filter(JobMeta.job_name == 'oauth_token').first()
 
-            with open('.credentials/.railway_oauth_token_refreshed.txt', 'w') as f:
-                f.write(refreshed_token)
+                if job_meta:
+                    job_meta.message = refreshed_token
+                    job_meta.last_success_at = datetime.now(timezone.utc)
+                    job_meta.status = 'active'
+                else:
+                    job_meta = JobMeta(
+                        job_name='oauth_token',
+                        message=refreshed_token,
+                        last_success_at=datetime.now(timezone.utc),
+                        status='active'
+                    )
+                    db.add(job_meta)
 
-            print("💾 Refreshed token saved to .credentials/.railway_oauth_token_refreshed.txt")
-            print("✅ Auto-refresh enabled! Next cron run will use this token automatically")
-            print("   (No manual Railway update needed unless refresh token expires)")
+                db.commit()
+                print("💾 Refreshed token saved to database (persists across Railway restarts)")
+                print("✅ Auto-refresh enabled! Token will be automatically used on next cron run")
+                print("   (No manual Railway update needed for ~6 months)")
+            finally:
+                db.close()
 
         except Exception as e:
-            print(f"⚠️ Failed to save refreshed token: {e}")
+            print(f"⚠️ Failed to save refreshed token to database: {e}")
 
 # Convenience function for easy import
 def get_oauth_credentials():
@@ -162,8 +189,8 @@ def get_oauth_credentials():
     manager = OAuthTokenManager()
     creds = manager.get_credentials()
 
-    # Save refreshed token if it was updated
+    # Save refreshed token to database if it was updated
     if manager.token_updated:
-        manager.save_refreshed_token_locally()
+        manager.save_refreshed_token_to_database()
 
     return creds
