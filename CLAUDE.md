@@ -286,10 +286,12 @@ Google OAuth uses TWO tokens:
 - **Access Token**: Short-lived (~1 hour) - used for API calls
 - **Refresh Token**: Long-lived (6+ months) - used to get new access tokens
 
-Our system **automatically refreshes** access tokens using the refresh token:
+Our system **automatically refreshes** access tokens AND persists them to the database:
 - `api/oauth_manager.py` detects expired access tokens
 - Automatically requests new access token using refresh_token
-- **No manual intervention needed!** 🎉
+- **Saves refreshed token to PostgreSQL** (survives Railway container restarts!)
+- Next cron run loads token from database (not environment variable)
+- **No manual intervention needed for ~6 months!** 🎉
 
 **One-Time Setup (only when refresh token is revoked):**
 ```bash
@@ -305,9 +307,12 @@ python scripts/testing/test_personal_sheets.py
 # 4. Update Railway environment variable ONCE
 # Railway Dashboard → Service → Variables → GOOGLE_OAUTH_TOKEN_JSON
 # Copy token from .railway_oauth_token_FRESH.txt
+
+# 5. On first cron run, refreshed token is saved to database
+# Future runs use database token (persists across Railway restarts!)
 ```
 
-**After setup:** The system will automatically refresh for 6+ months!
+**After setup:** The system will automatically refresh for ~6 months!
 
 **Monitoring OAuth Health:**
 ```bash

@@ -6,6 +6,54 @@ This document contains hard-learned lessons from Railway deployment debugging. *
 
 ---
 
+## 🔐 OAuth Token Persistence (CRITICAL FIX - Nov 2025)
+
+### ⚠️ Problem: Tokens Expiring Every 1-2 Weeks
+**Root Cause:** Refreshed OAuth tokens were saved to **local files**, but Railway containers are **ephemeral**. Files don't persist across:
+- Container restarts
+- Deployments
+- Cron job completions
+
+**What was happening:**
+1. Token refreshes successfully ✅
+2. Saved to `.credentials/.railway_oauth_token_refreshed.txt` ✅
+3. Container destroyed → **File deleted** ❌
+4. Next run loads **old token** from environment variable ❌
+5. Google eventually revokes the old refresh token 💥
+
+### ✅ Solution: Database-Backed Token Persistence
+**Fixed in:** `api/oauth_manager.py` (Nov 2025)
+
+Now refreshed tokens are saved to **PostgreSQL** (`job_meta` table):
+```python
+# Priority 1: Load from database (persists across restarts)
+job_meta = db.query(JobMeta).filter(JobMeta.job_name == 'oauth_token').first()
+
+# Priority 2: Fall back to environment variable (first run only)
+token_json = os.getenv('GOOGLE_OAUTH_TOKEN_JSON')
+
+# After refresh: Save to database
+job_meta.message = refreshed_token  # Persists across Railway restarts!
+```
+
+**Result:** OAuth tokens now auto-refresh for **~6 months** without manual intervention! 🎉
+
+### 📋 One-Time Setup (when refresh token is revoked)
+```bash
+# 1. Generate fresh token locally
+rm -f token.json
+python scripts/testing/test_personal_sheets.py
+
+# 2. Update Railway environment variable
+cat .credentials/.railway_oauth_token_FRESH.txt | pbcopy
+# Railway Dashboard → Variables → GOOGLE_OAUTH_TOKEN_JSON → Paste
+
+# 3. First cron run saves to database
+# Future runs use database token automatically!
+```
+
+---
+
 ## 🚀 Railway Deployment - DO's
 
 ### ✅ Working Architecture
@@ -250,3 +298,6 @@ On Railway, env var is automatically available to cron jobs.
 ---
 
 *💡 Always update this document when learning new lessons or solving new deployment issues.*
+*💡 Always update this document when learning new lessons or solving new deployment issues.*
+*💡 Always update this document when learning new lessons or solving new deployment issues.*
+*💡 Always update this document when learning new lessons or solving new deployment issues.*where
