@@ -35,7 +35,17 @@ class SheetIngestor:
 
             # Fetch data from sheets
             raw_data = self.sheets_client.get_picks_data()
+            print(f"📊 Fetched {len(raw_data)} rows from Sheet")
+            print(f"📋 Header: {raw_data[0][:8] if raw_data else 'No data'}...")
+
             parsed_data = self.sheets_client.parse_picks_data(raw_data)
+            print(f"👥 Parsed {len(parsed_data['players'])} players")
+            print(f"📊 Parsed {len(parsed_data['picks'])} picks")
+
+            if len(parsed_data['picks']) > 0:
+                print(f"   Sample pick: {parsed_data['picks'][0]}")
+            else:
+                print(f"   ⚠️ WARNING: No picks parsed!")
 
             # Process players and picks
             players_created = self.upsert_players(db, parsed_data["players"])
@@ -80,6 +90,7 @@ class SheetIngestor:
     def upsert_picks(self, db: Session, picks_data: list) -> int:
         """Create or update picks, respecting lock status"""
         updated_count = 0
+        skipped_no_player = 0
 
         for pick_data in picks_data:
             player = db.query(Player).filter(
@@ -87,6 +98,7 @@ class SheetIngestor:
             ).first()
 
             if not player:
+                skipped_no_player += 1
                 continue
 
             # Check if pick exists
@@ -115,6 +127,9 @@ class SheetIngestor:
                 )
                 db.add(new_pick)
                 updated_count += 1
+
+        if skipped_no_player > 0:
+            print(f"   ⚠️ Skipped {skipped_no_player} picks (player not found)")
 
         return updated_count
 
