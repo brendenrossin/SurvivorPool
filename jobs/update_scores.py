@@ -16,6 +16,7 @@ from api.database import SessionLocal
 from api.models import Game, Pick, PickResult, JobMeta, Player
 from api.score_providers import get_score_provider
 from api.odds_providers import get_odds_provider
+from api.job_locks import advisory_lock, LOCK_INGESTION_AND_SCORING
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -81,36 +82,48 @@ class ScoreUpdater:
         try:
             print(f"Starting score update at {datetime.now()}")
 
-            # Update job meta
-            self.update_job_meta(db, "update_scores", "running", "Starting score update")
+            # Acquire advisory lock to prevent concurrent execution with sheet ingestion
+            with advisory_lock(db, LOCK_INGESTION_AND_SCORING):
+                # Update job meta
+                self.update_job_meta(db, "update_scores", "running", "Starting score update")
 
-            # Get current week
-            current_week = self.score_provider.get_current_week(self.season)
-            print(f"Updating scores for Season {self.season}, Week {current_week}")
+                # Get current week
+                current_week = self.score_provider.get_current_week(self.season)
+                print(f"Updating scores for Season {self.season}, Week {current_week}")
 
-            # Fetch games and scores for current week
-            games = self.score_provider.get_schedule_and_scores(self.season, current_week)
+                # Fetch games and scores for current week
+                games = self.score_provider.get_schedule_and_scores(self.season, current_week)
 
-            # Optionally fetch betting odds (for backwards compatibility or manual runs)
-            if fetch_odds:
-                print("🎰 Fetching odds along with scores...")
-                odds_data = self.odds_provider.get_nfl_odds(self.season, current_week)
-                games_with_odds = self.merge_odds_with_games(games, odds_data)
+                # Optionally fetch betting odds (for backwards compatibility or manual runs)
+                if fetch_odds:
+                    print("🎰 Fetching odds along with scores...")
+                    odds_data = self.odds_provider.get_nfl_odds(self.season, current_week)
+                    games_with_odds = self.merge_odds_with_games(games, odds_data)
+                else:
+                    games_with_odds = games
+
+                # Update games in database
+                games_updated = self.upsert_games(db, games_with_odds)
+
+                # Process ALL elimination logic using shared helper
+                elimination_results = self.process_all_eliminations(db, current_week)
+
+                db.commit()
+
+                message = f"Updated {games_updated} games, {elimination_results['picks_updated']} pick results, finalized {elimination_results['stuck_games_fixed']} stuck games, eliminated {elimination_results['missing_pick_eliminations']} players with missing picks"
+                self.update_job_meta(db, "update_scores", "success", message)
+
+                print(f"Score update completed: {message}")
+
+        except RuntimeError as e:
+            # Advisory lock timeout - log but don't fail
+            if "advisory lock" in str(e):
+                error_msg = f"Skipped score update (lock busy): {str(e)}"
+                self.update_job_meta(db, "update_scores", "skipped", error_msg)
+                print(f"⏭️  {error_msg}")
+                return False
             else:
-                games_with_odds = games
-
-            # Update games in database
-            games_updated = self.upsert_games(db, games_with_odds)
-
-            # Process ALL elimination logic using shared helper
-            elimination_results = self.process_all_eliminations(db, current_week)
-
-            db.commit()
-
-            message = f"Updated {games_updated} games, {elimination_results['picks_updated']} pick results, finalized {elimination_results['stuck_games_fixed']} stuck games, eliminated {elimination_results['missing_pick_eliminations']} players with missing picks"
-            self.update_job_meta(db, "update_scores", "success", message)
-
-            print(f"Score update completed: {message}")
+                raise  # Re-raise other RuntimeErrors
 
         except Exception as e:
             db.rollback()

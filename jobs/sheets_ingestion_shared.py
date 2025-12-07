@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import text
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult
+from api.job_locks import advisory_lock, LOCK_INGESTION_AND_SCORING
 
 
 def parse_picks_data(raw_data):
@@ -94,88 +95,98 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
     try:
         print("👥 Ingesting players and picks...")
 
-        season = int(os.getenv('NFL_SEASON', 2025))
+        # Acquire advisory lock to prevent concurrent execution with score updates
+        with advisory_lock(db, LOCK_INGESTION_AND_SCORING):
+            season = int(os.getenv('NFL_SEASON', 2025))
 
-        # Clear existing picks and players - we'll recalculate pick_results from current games
-        print("🧹 Clearing existing pick and player data...")
+            # Clear existing picks and players - we'll recalculate pick_results from current games
+            print("🧹 Clearing existing pick and player data...")
 
-        # Delete picks and players (this cascades to pick_results)
-        db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
-        db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
-        db.commit()
-        print("✅ Existing data cleared")
+            # Delete picks and players (this cascades to pick_results)
+            db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
+            db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
+            db.commit()
+            print("✅ Existing data cleared")
 
-        players_created = 0
-        picks_created = 0
-        picks_updated = 0
+            players_created = 0
+            picks_created = 0
+            picks_updated = 0
 
-        for player_name, weekly_picks in players_data.items():
-            # Get or create player
-            player = db.query(Player).filter(Player.display_name == player_name).first()
+            for player_name, weekly_picks in players_data.items():
+                # Get or create player
+                player = db.query(Player).filter(Player.display_name == player_name).first()
 
-            if not player:
-                player = Player(display_name=player_name)
-                db.add(player)
-                db.flush()  # Get ID
-                players_created += 1
-                print(f"   ➕ Created player: {player_name}")
+                if not player:
+                    player = Player(display_name=player_name)
+                    db.add(player)
+                    db.flush()  # Get ID
+                    players_created += 1
+                    print(f"   ➕ Created player: {player_name}")
 
-            # Process weekly picks
-            for week, team in weekly_picks.items():
-                # Check if pick already exists
-                existing_pick = db.query(Pick).filter(
-                    Pick.player_id == player.player_id,
-                    Pick.season == season,
-                    Pick.week == week
-                ).first()
+                # Process weekly picks
+                for week, team in weekly_picks.items():
+                    # Check if pick already exists
+                    existing_pick = db.query(Pick).filter(
+                        Pick.player_id == player.player_id,
+                        Pick.season == season,
+                        Pick.week == week
+                    ).first()
 
-                if existing_pick:
-                    # Update if team changed
-                    if existing_pick.team_abbr != team:
-                        print(f"   🔄 Updating {player_name} Week {week}: {existing_pick.team_abbr} → {team}")
-                        existing_pick.team_abbr = team
-                        picks_updated += 1
-                else:
-                    # Create new pick
-                    new_pick = Pick(
-                        player_id=player.player_id,
-                        season=season,
-                        week=week,
-                        team_abbr=team,
-                        source=source_label
-                    )
-                    db.add(new_pick)
-                    picks_created += 1
+                    if existing_pick:
+                        # Update if team changed
+                        if existing_pick.team_abbr != team:
+                            print(f"   🔄 Updating {player_name} Week {week}: {existing_pick.team_abbr} → {team}")
+                            existing_pick.team_abbr = team
+                            picks_updated += 1
+                    else:
+                        # Create new pick
+                        new_pick = Pick(
+                            player_id=player.player_id,
+                            season=season,
+                            week=week,
+                            team_abbr=team,
+                            source=source_label
+                        )
+                        db.add(new_pick)
+                        picks_created += 1
 
-        # Re-calculate ALL elimination results using shared helper
-        # This ensures consistency with app startup and cron jobs
-        print("🔄 Re-calculating elimination results from current game data...")
-        try:
-            # Use SHARED HELPER to ensure consistency
-            from jobs.update_scores import ScoreUpdater
+            # Re-calculate ALL elimination results using shared helper
+            # This ensures consistency with app startup and cron jobs
+            print("🔄 Re-calculating elimination results from current game data...")
+            try:
+                # Use SHARED HELPER to ensure consistency
+                from jobs.update_scores import ScoreUpdater
 
-            updater = ScoreUpdater()
+                updater = ScoreUpdater()
 
-            # Process ALL elimination logic (picks, stuck games, missing picks)
-            elimination_results = updater.process_all_eliminations(db)
+                # Process ALL elimination logic (picks, stuck games, missing picks)
+                elimination_results = updater.process_all_eliminations(db)
 
-            print(f"   ✅ Elimination processing complete:")
-            print(f"      - Pick results: {elimination_results['picks_updated']}")
-            print(f"      - Stuck games fixed: {elimination_results['stuck_games_fixed']}")
-            print(f"      - Missing pick eliminations: {elimination_results['missing_pick_eliminations']}")
-        except Exception as e:
-            print(f"   ⚠️ Failed to process eliminations: {e}")
-            import traceback
-            traceback.print_exc()
+                print(f"   ✅ Elimination processing complete:")
+                print(f"      - Pick results: {elimination_results['picks_updated']}")
+                print(f"      - Stuck games fixed: {elimination_results['stuck_games_fixed']}")
+                print(f"      - Missing pick eliminations: {elimination_results['missing_pick_eliminations']}")
+            except Exception as e:
+                print(f"   ⚠️ Failed to process eliminations: {e}")
+                import traceback
+                traceback.print_exc()
 
-        db.commit()
+            db.commit()
 
-        print(f"✅ Ingestion complete!")
-        print(f"   Players created: {players_created}")
-        print(f"   Picks created: {picks_created}")
-        print(f"   Picks updated: {picks_updated}")
+            print(f"✅ Ingestion complete!")
+            print(f"   Players created: {players_created}")
+            print(f"   Picks created: {picks_created}")
+            print(f"   Picks updated: {picks_updated}")
 
         return True
+
+    except RuntimeError as e:
+        # Advisory lock timeout - log but don't fail
+        if "advisory lock" in str(e):
+            print(f"⏭️  Skipped ingestion (lock busy): {str(e)}")
+            return False
+        else:
+            raise  # Re-raise other RuntimeErrors
 
     except Exception as e:
         print(f"❌ Database ingestion failed: {e}")
