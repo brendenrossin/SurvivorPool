@@ -37,6 +37,7 @@ from app.dashboard_data import (
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
+from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
 from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
 from app.odds_helpers import get_underdog_spread_text
@@ -151,11 +152,13 @@ def main():
                 last_updates = summary_preview.get("last_updates", {})
                 ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")
                 if ts:
-                    from datetime import timezone, timedelta
-                    pst_tz = timezone(timedelta(hours=-8))
-                    ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
-                    label = ts_pst.strftime("%m/%d %H:%M")
-                    st.markdown(f'<span class="chip gray">🕒 Last updated: {label} PST</span>', unsafe_allow_html=True)
+                    import pytz
+                    from datetime import timezone
+                    pacific = pytz.timezone('America/Los_Angeles')
+                    ts_pacific = ts.replace(tzinfo=timezone.utc).astimezone(pacific)
+                    label = ts_pacific.strftime("%m/%d %I:%M %p")
+                    tz_abbr = ts_pacific.strftime("%Z")  # PDT or PST depending on DST
+                    st.markdown(f'<span class="chip gray">🕒 Last updated: {label} {tz_abbr}</span>', unsafe_allow_html=True)
             except:
                 pass
 
@@ -266,7 +269,7 @@ def main():
     st.markdown("### 📊 Pool Insights")
 
     # Create tabs for Pool Insights features
-    tab1, tab2, tab3 = st.tabs(["Team of Doom", "Graveyard", "Elimination Tracker"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Team of Doom", "Survivors", "Graveyard", "Elimination Tracker"])
 
     with tab1:
         try:
@@ -285,6 +288,19 @@ def main():
         try:
             db = SessionLocal()
             try:
+                render_survivors_widget(db, SEASON)
+            finally:
+                try:
+                    db.close()
+                except:
+                    pass
+        except Exception as e:
+            st.info("✨ Survivors will appear once picks are made!")
+
+    with tab3:
+        try:
+            db = SessionLocal()
+            try:
                 render_graveyard_widget(db, SEASON)
             finally:
                 try:
@@ -294,7 +310,7 @@ def main():
         except Exception as e:
             st.info("⚰️ Graveyard will fill up as players get eliminated!")
 
-    with tab3:
+    with tab4:
         try:
             db = SessionLocal()
             try:
@@ -718,11 +734,13 @@ def render_last_updated_chip(last_updates):
     # Prefer scores timestamp if present, else ingest
     ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")
     if ts:
-        # Convert UTC to PST (UTC-8)
-        pst_tz = timezone(timedelta(hours=-8))
-        ts_pst = ts.replace(tzinfo=timezone.utc).astimezone(pst_tz)
-        label = ts_pst.strftime("%m/%d %H:%M")
-        st.caption(f"🕒 Last updated: {label} (PST)")
+        # Convert UTC to Pacific time (handles PST/PDT automatically)
+        import pytz
+        pacific = pytz.timezone('America/Los_Angeles')
+        ts_pacific = ts.replace(tzinfo=timezone.utc).astimezone(pacific)
+        label = ts_pacific.strftime("%m/%d %I:%M %p")
+        tz_abbr = ts_pacific.strftime("%Z")  # PDT or PST
+        st.caption(f"🕒 Last updated: {label} {tz_abbr}")
 
 def render_footer(last_updates):
     """Render footer with update information"""
@@ -731,19 +749,22 @@ def render_footer(last_updates):
     col1, col2 = st.columns(2)
 
     with col1:
-        from datetime import timezone, timedelta
-        pst_tz = timezone(timedelta(hours=-8))
+        from datetime import timezone
+        import pytz
+        pacific = pytz.timezone('America/Los_Angeles')
 
         st.caption("**Data Sources:**")
         if "ingest_sheet" in last_updates and last_updates["ingest_sheet"]:
-            sheet_time_pst = last_updates["ingest_sheet"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-            sheet_time = sheet_time_pst.strftime("%m/%d %H:%M")
-            st.caption(f"📊 Picks: {sheet_time} PST")
+            sheet_time_pacific = last_updates["ingest_sheet"].replace(tzinfo=timezone.utc).astimezone(pacific)
+            sheet_time = sheet_time_pacific.strftime("%m/%d %I:%M %p")
+            tz_abbr = sheet_time_pacific.strftime("%Z")
+            st.caption(f"📊 Picks: {sheet_time} {tz_abbr}")
 
         if "update_scores" in last_updates and last_updates["update_scores"]:
-            scores_time_pst = last_updates["update_scores"].replace(tzinfo=timezone.utc).astimezone(pst_tz)
-            scores_time = scores_time_pst.strftime("%m/%d %H:%M")
-            st.caption(f"🏈 Scores: {scores_time} PST")
+            scores_time_pacific = last_updates["update_scores"].replace(tzinfo=timezone.utc).astimezone(pacific)
+            scores_time = scores_time_pacific.strftime("%m/%d %I:%M %p")
+            tz_abbr = scores_time_pacific.strftime("%Z")
+            st.caption(f"🏈 Scores: {scores_time} {tz_abbr}")
 
     with col2:
         st.caption("*Survivor Pool Dashboard - Real-time NFL elimination tracking*")

@@ -19,7 +19,13 @@ def main():
     try:
         # Get the project root directory
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        script_path = os.path.join(project_root, "jobs", "ingest_personal_sheets.py")
+
+        # Note: No OAuth token refresh needed - using service account!
+        print("🔑 Using service account (no OAuth token refresh needed)")
+
+        # Step 2: Run sheets ingestion (using service account)
+        print("\n📊 Step 2: Ingesting picks from Google Sheets (service account)...")
+        script_path = os.path.join(project_root, "jobs", "ingest_sheet.py")
 
         # Run the sheets ingestion script directly
         result = subprocess.run([
