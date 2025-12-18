@@ -50,6 +50,20 @@ google-credentials.json
 .railway_oauth_token_refreshed.txt
 .credentials/
 
+# Claude Code settings (may contain secrets)
+.claude/settings.json
+.claude/settings.local.json
+
+# Testing scripts (often contain hardcoded DATABASE_URLs)
+scripts/testing/*.sh
+scripts/migrate_*.py
+scripts/*_snapshot.py
+
+# Git cleanup files (contain sensitive data)
+.secrets_to_remove.txt
+.git_replacements.txt
+GIT_HISTORY_CLEANUP.md
+
 # IDE and editor files
 .vscode/
 .idea/
