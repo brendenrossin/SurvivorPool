@@ -607,7 +607,7 @@ def render_player_search():
 
     if search_query:
         # Search for matching players
-        matching_players = search_players(search_query)
+        matching_players = search_players(search_query, SEASON)
 
         if matching_players:
             selected_player = st.selectbox("Select player:", matching_players)
