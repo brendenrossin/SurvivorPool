@@ -351,8 +351,43 @@ SELECT COUNT(*) FROM players WHERE player_id NOT IN (
 # Always test locally before pushing
 git add .
 git commit -m "descriptive message"
-git push origin staging  # Auto-deploys to Railway
+git push origin staging  # Deploys the STAGING environment only
 ```
+
+Branch strategy: `feature/*` → `staging` → `main`.
+
+### ⚠️ Railway Environments (BOTH deploy — know which)
+
+The Railway project `exquisite-expression` has **three** environments. `staging`
+is NOT the live app:
+
+| Environment | Deploys from | Services |
+|---|---|---|
+| **production** | **`main`** | `nfl-survivor-2025` (**the live URL**), `Sheets-Cron-Prod`, `Scores-Cron-Prod`, `Odds-Cron-Prod`, `Postgres` |
+| staging | `staging` | `nfl-survivor-2025`, `Sheets-Cron`, `Scores-Cron`, `Odds-Cron`, `Postgres` |
+| Dev | `feature/multi-league` | `Web-Dev`, `postgres-dev` |
+
+- **`https://nfl-survivor-2025.up.railway.app/` is the PRODUCTION service and deploys from `main`.**
+  Merging to `main` is a live deploy — never fast-forward `main` casually.
+- production and staging have **separate Postgres instances**. The production DB is
+  reachable at `ballast.proxy.rlwy.net`; staging at `mainline.proxy.rlwy.net`.
+  Check which host `DATABASE_PUBLIC_URL` points at before running any query.
+- Cron **schedules are dashboard-only** — not visible via `railway` CLI and not in
+  any repo config. The `railway-*.toml` files set the start command, not the schedule.
+- The CLI can `--set` variables and create domains, but **cannot unset a variable or
+  delete/rename a domain**. Those are dashboard-only operations.
+
+### 🔁 Rolling to a new season
+
+`NFL_SEASON` and `GOOGLE_SHEETS_SPREADSHEET_ID` must change **together**, on all four
+services in an environment. Setting the season alone leaves ingestion pointed at last
+year's sheet, which writes the previous season's picks under the new season number.
+
+Ingestion clears only the target season (`clear_season_data()` in
+`jobs/sheets_ingestion_shared.py`); prior seasons are preserved as history. Players are
+a season-independent identity table — the season lives on `picks`, so any query that
+starts from `players` must be narrowed through the season's picks, or it counts every
+player who has ever entered the pool.
 
 ## 🎯 MVP vs Future Features
 
