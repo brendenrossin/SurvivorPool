@@ -9,11 +9,14 @@ DO NOT DUPLICATE THIS LOGIC - update this file if changes are needed.
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import text
 from api.database import SessionLocal
-from api.models import Player, Pick, PickResult
+from api.models import Player, Pick, PickResult, JobMeta
 from api.job_locks import advisory_lock, LOCK_INGESTION_AND_SCORING
+
+# The job_meta row monitor_oauth_health.py reads to decide if ingestion is alive.
+INGEST_JOB_NAME = "ingest_sheet"
 
 
 def parse_picks_data(raw_data):
@@ -102,6 +105,49 @@ def clear_season_data(db, season):
         DELETE FROM players
         WHERE player_id NOT IN (SELECT DISTINCT player_id FROM picks)
     """))
+
+
+def record_job_run(db, job_name, status, message):
+    """Record a job's outcome in ``job_meta``.
+
+    ``monitor_oauth_health.py`` reads this to decide whether ingestion is
+    healthy, so a run that does not write here is invisible to monitoring no
+    matter how well it went.
+
+    ``last_success_at`` is only advanced on success - a later failure must not
+    erase when ingestion last actually worked, since that gap is the signal.
+
+    Args:
+        db: SQLAlchemy session
+        job_name: row key, e.g. ``INGEST_JOB_NAME``
+        status: "success", "error" or "skipped"
+        message: human-readable detail shown by the monitor
+    """
+    row = db.query(JobMeta).filter(JobMeta.job_name == job_name).first()
+    if not row:
+        row = JobMeta(job_name=job_name)
+        db.add(row)
+
+    now = datetime.now(timezone.utc)
+    row.last_run_at = now
+    row.status = status
+    row.message = message
+    if status == "success":
+        row.last_success_at = now
+
+    db.commit()
+
+
+def _report(db, status, message):
+    """Record an outcome without ever changing it.
+
+    Monitoring is not worth losing an ingestion over, so a failure to write
+    job_meta is logged and swallowed.
+    """
+    try:
+        record_job_run(db, INGEST_JOB_NAME, status, message)
+    except Exception as e:
+        print(f"⚠️ Could not record job_meta ({status}): {e}")
 
 
 def ingest_players_and_picks(players_data, source_label="google_sheets"):
@@ -201,14 +247,27 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
             print(f"   Picks created: {picks_created}")
             print(f"   Picks updated: {picks_updated}")
 
+            # Report the sheet's totals, not just the deltas: a run that changes
+            # nothing still says how many picks it saw, so a drop to zero shows up.
+            total_players = len(players_data)
+            total_picks = sum(len(weeks) for weeks in players_data.values())
+            _report(db, "success", (
+                f"Ingested {total_players} player{'' if total_players == 1 else 's'}, "
+                f"{total_picks} pick{'' if total_picks == 1 else 's'} for season {season} "
+                f"({players_created} new players, {picks_created} new picks, "
+                f"{picks_updated} updated)"
+            ))
+
         return True
 
     except RuntimeError as e:
         # Advisory lock timeout - log but don't fail
         if "advisory lock" in str(e):
             print(f"⏭️  Skipped ingestion (lock busy): {str(e)}")
+            _report(db, "skipped", f"Lock busy, will retry next run: {e}")
             return False
         else:
+            _report(db, "error", str(e))
             raise  # Re-raise other RuntimeErrors
 
     except Exception as e:
@@ -216,6 +275,8 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
         db.rollback()
         import traceback
         traceback.print_exc()
+        # After the rollback, so the failure record survives it.
+        _report(db, "error", str(e))
         return False
 
     finally:
