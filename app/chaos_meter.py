@@ -18,10 +18,21 @@ def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict
     from api.models import Pick, PickResult, Player
 
     try:
-        # Get total players who originally started
-        total_original_players = db.query(Player).count()
+        # Get total players who actually made picks in this season (not just in Player table)
+        total_original_players = db.query(Pick.player_id).filter(
+            Pick.season == current_season
+        ).distinct().count()
 
-        # Get players eliminated in previous weeks (before this week)
+        # Get TOTAL unique players eliminated through this week (cumulative)
+        total_eliminated = db.query(Pick.player_id).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == current_season,
+            Pick.week <= week,
+            PickResult.survived == False
+        ).distinct().count()
+
+        # Get TOTAL unique players eliminated before this week
         eliminated_before_week = db.query(Pick.player_id).join(
             PickResult, Pick.pick_id == PickResult.pick_id
         ).filter(
@@ -30,14 +41,8 @@ def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict
             PickResult.survived == False
         ).distinct().count()
 
-        # Get players eliminated in this specific week
-        eliminated_this_week = db.query(Pick.player_id).join(
-            PickResult, Pick.pick_id == PickResult.pick_id
-        ).filter(
-            Pick.season == current_season,
-            Pick.week == week,
-            PickResult.survived == False
-        ).distinct().count()
+        # Calculate players eliminated THIS WEEK ONLY (new eliminations)
+        eliminated_this_week = total_eliminated - eliminated_before_week
 
         # Players that made it to this week (started minus eliminated before)
         players_entering_week = total_original_players - eliminated_before_week
@@ -46,7 +51,6 @@ def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict
         week_elimination_percentage = (eliminated_this_week / players_entering_week * 100) if players_entering_week > 0 else 0
 
         # Calculate cumulative elimination percentage (total eliminated / original total)
-        total_eliminated = eliminated_before_week + eliminated_this_week
         cumulative_elimination_percentage = (total_eliminated / total_original_players * 100) if total_original_players > 0 else 0
 
         return {
