@@ -85,6 +85,37 @@ def get_started_game_weeks(season: int) -> List[int]:
             pass
 
 
+def count_completed_weeks(week_statuses: Dict[int, List[str]]) -> int:
+    """How many weeks have finished, given {week: [game status, ...]}.
+
+    A survival round is over when every game in it is final - not when it has
+    picks. The sheet is filled in weeks ahead of kickoff, so counting weeks
+    with picks reports a round complete before it has been played.
+    """
+    return sum(
+        1 for statuses in week_statuses.values()
+        if statuses and all(status == "final" for status in statuses)
+    )
+
+
+@st.cache_data(ttl=60)
+def get_completed_week_count(season: int) -> int:
+    """Number of survival rounds actually played out this season."""
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        rows = db.query(Game.week, Game.status).filter(Game.season == season).all()
+        by_week: Dict[int, List[str]] = {}
+        for week, status in rows:
+            by_week.setdefault(week, []).append(status)
+        return count_completed_weeks(by_week)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
 def get_summary_data(season: int) -> Dict:
     """Get summary data for dashboard"""
