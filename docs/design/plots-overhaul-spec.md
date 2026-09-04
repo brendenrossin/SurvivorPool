@@ -219,6 +219,68 @@ panels are empty **today**. Each names the specific precondition it is waiting o
 
 ---
 
+---
+
+## The dark surface's blast radius
+
+Changing the surface breaks light-mode assumptions baked into already-merged code.
+Enumerated below with ownership, because most of the damage is outside this branch's
+files. All verified against the code at `06f61fc`.
+
+### Mine to fix — the shared chart theming layer
+
+`app/mobile_plotly_config.py` is **not** in Session B's excluded set, and every one of
+its six `render_mobile_chart` call sites is in a file this branch owns
+(`graveyard`, `team_of_doom`, `survivors`, `chaos_meter`, and the donut in `main.py`
+that is being deleted). The picks grid is the only chart that bypasses it. So this
+layer can be re-tokenized with **zero Session B call sites** — it is the single
+biggest sweep and it is entirely self-contained.
+
+| Problem | Location |
+|---|---|
+| `MOBILE_LAYOUT_DEFAULTS` sets font `#0F172A` on transparent paper/plot backgrounds — dark ink on a dark surface for every chart routing through it | `mobile_plotly_config.py` (14 occurrences of `#0F172A`) |
+| `apply_mobile_optimization` sets hover `bgcolor="white"` with `#0F172A` ink — a white tooltip on a dark app | `mobile_plotly_config.py:109` |
+| `MOBILE_COLORS` is the default matplotlib-era palette (`#1f77b4`, `#d62728`) | `mobile_plotly_config.py:151` |
+| `create_touch_annotation` hardcodes `rgba(255,255,255,0.8)` and `color="black"` | `mobile_plotly_config.py:136` |
+
+**Re-tokenize, do not revert.** The hover font colour was only just added — before
+that it set no font colour at all and Plotly's auto-contrast rendered white on white.
+Dropping the key would restore that bug in a new form.
+
+`MOBILE_COLORS` loses both its consumers under this branch (the donut is deleted;
+`chaos_meter` imports `get_mobile_color_scheme` without using it), and
+`create_touch_annotation` already has **zero call sites** — both go with the dead code.
+
+`APP_SURFACE` in `main.py:62` is a one-line token swap. It is threaded through to
+`build_picks_grid(background=...)`, which is what earlier weeks' cells blend toward
+via `mute_color`. Pointing it at the dark surface makes the grid's muting work
+unchanged; leaving it makes every history cell blend toward white and glow. The
+constant lives in this branch's region even though its consumer does not.
+
+### To raise with Session B — not edited here
+
+Three fixes land in `app/picks_grid.py`, which this branch does not own. This branch
+is what makes them live; none is a regression it introduces.
+
+1. **History ink is hardcoded.** `color=label_ink(fill) if is_now else "#52514e"`
+   (`picks_grid.py:236`). Already logged as latent in the backlog. The fix is *not*
+   `label_ink(fill)` unconditionally — the softer grey is deliberate, it makes history
+   recede while the current week pops. It needs a dark-surface equivalent of "receded
+   but legible": a dimmed token, not full-contrast ink.
+2. **A hardcoded light tooltip** — `bgcolor="#ffffff"`, `bordercolor="#d3d6dc"`,
+   font `#0b0b0b` (`picks_grid.py:279-281`).
+3. **The border rule inverts.** `line=dict(width=1, color="rgba(0,0,0,.12)" if
+   relative_luminance(fill) > 0.6 else fill)` (`picks_grid.py:226`) draws a dark
+   hairline so *light* fills do not dissolve into a *light* surface. On a dark surface
+   the threshold flips: dark fills are the ones that vanish and need a light hairline.
+   Same idea, opposite side of the comparison.
+
+**The picks-grid encoding stays intact.** Muted = earlier week, full colour = current
+week, colour carries identity rather than magnitude. This branch changes the surface
+that encoding sits on, which is why `lift_color`'s hue preservation is the right
+property — but the encoding itself is approved and locked, and amending it is the
+owner's call, not a between-sessions one.
+
 ## Performance and rules
 
 - `@st.fragment` on the two tabs carrying filter widgets (Graveyard, Team of Doom), so
