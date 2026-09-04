@@ -207,9 +207,17 @@ that is live in production today, not the SaaS build-out.
       the widget modules cache their database reads (`survivors.py` is an N+1).
       See `docs/optimizations/picks-grid-backlog.md`.
 - [ ] **Live scores should roll forward on Tuesday.** Once Monday's games are
-      final, the widget should show the *next* week's games — still filtered to
-      teams somebody has picked. Carried over from the 2025-09-18 working notes;
-      never implemented.
+      final, the widget should show the *next* week's games. Carried over from
+      the 2025-09-18 working notes; never implemented.
+      **Correction:** those notes said "only if a team from that game has been
+      picked", and as written that leaks. Filtering an unplayed week's slate to
+      picked teams publishes the field's next-week picks days before kickoff —
+      by omission rather than by a number, but it is the same disclosure
+      `aggregate_picks()` exists to prevent. Shipping shape: a week that has not
+      kicked off shows the **full slate, no pick counts, no filtering**, and
+      snaps to picked-teams-only with counts once it starts. The grid's
+      `resolve_current_week` stays pointed at the last week that kicked off and
+      is deliberately *not* unified with the scoreboard's notion of current.
 - [ ] **Every empty state needs its own message.** Each plot, card and table
       should explain *why* it has nothing to show rather than rendering blank or
       a generic line. Carried over from the same notes; partially done (the
