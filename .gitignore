@@ -125,3 +125,5 @@ test_env/
 
 # Streamlit cache
 .streamlit/
+# Local skill symlinks (absolute paths, machine-specific)
+.claude/skills/

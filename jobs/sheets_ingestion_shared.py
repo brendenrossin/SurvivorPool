@@ -78,6 +78,32 @@ def parse_picks_data(raw_data):
     return players_data
 
 
+def clear_season_data(db, season):
+    """Remove one season's picks so they can be re-ingested from the sheet.
+
+    Players are a season-independent identity table: the season lives on
+    ``picks``, so a player is only deleted once they have no picks left in ANY
+    season. This preserves prior seasons as history while still cleaning up
+    players who dropped out of the pool entirely.
+
+    Deleting picks cascades to ``pick_results`` via the foreign key.
+
+    Args:
+        db: SQLAlchemy session
+        season: The season to clear (e.g. 2026)
+    """
+    print(f"🧹 Clearing season {season} picks...")
+
+    db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
+
+    # Drop players who no longer appear in any season. Deleting players still
+    # referenced by prior-season picks would violate the picks.player_id FK.
+    db.execute(text("""
+        DELETE FROM players
+        WHERE player_id NOT IN (SELECT DISTINCT player_id FROM picks)
+    """))
+
+
 def ingest_players_and_picks(players_data, source_label="google_sheets"):
     """Insert/update players and picks in database
 
@@ -99,12 +125,9 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
         with advisory_lock(db, LOCK_INGESTION_AND_SCORING):
             season = int(os.getenv('NFL_SEASON', 2025))
 
-            # Clear existing picks and players - we'll recalculate pick_results from current games
-            print("🧹 Clearing existing pick and player data...")
-
-            # Delete picks and players (this cascades to pick_results)
-            db.execute(text("DELETE FROM picks WHERE season = :season"), {"season": season})
-            db.execute(text("DELETE FROM players"))  # Clear all players to avoid orphans
+            # Clear this season's picks so they can be re-ingested from the sheet.
+            # Prior seasons are left untouched - see clear_season_data().
+            clear_season_data(db, season)
             db.commit()
             print("✅ Existing data cleared")
 

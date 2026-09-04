@@ -24,6 +24,45 @@ def load_team_data() -> Dict:
     with open("db/seed_team_map.json", "r") as f:
         return json.load(f)
 
+def _season_player_ids(db, season):
+    """Subquery of player_ids who made at least one pick in the given season.
+
+    Players are season-independent, so the season lives on picks. Any count
+    that starts from the players table must be narrowed through this.
+    """
+    return db.query(Pick.player_id).filter(Pick.season == season).distinct().subquery()
+
+
+def count_season_entrants(db, season: int) -> int:
+    """Number of players who entered the pool in the given season."""
+    return db.query(Pick.player_id).filter(Pick.season == season).distinct().count()
+
+
+def count_season_survivors(db, season: int) -> int:
+    """Number of this season's entrants with no losing pick yet."""
+    eliminated = db.query(Pick.player_id).join(PickResult).filter(
+        and_(
+            Pick.season == season,
+            PickResult.survived == False
+        )
+    ).distinct().subquery()
+
+    return db.query(Player).filter(
+        Player.player_id.in_(select(_season_player_ids(db, season).c.player_id)),
+        ~Player.player_id.in_(select(eliminated.c.player_id))
+    ).count()
+
+
+def find_season_players(db, season: int, query: str):
+    """Player names matching `query` among the given season's entrants."""
+    rows = db.query(Player.display_name).filter(
+        Player.player_id.in_(select(_season_player_ids(db, season).c.player_id)),
+        Player.display_name.ilike(f"%{query}%")
+    ).distinct().all()
+
+    return [r[0] for r in rows]
+
+
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
 def get_summary_data(season: int) -> Dict:
     """Get summary data for dashboard"""
@@ -34,20 +73,10 @@ def get_summary_data(season: int) -> Dict:
         weeks_query = db.query(Pick.week).filter(Pick.season == season).distinct().all()
         weeks = sorted([w[0] for w in weeks_query])
 
-        # Get total entrants
-        total_entrants = db.query(Player).count()
-
-        # Get remaining players (no survived=False)
-        eliminated_players = db.query(Pick.player_id).join(PickResult).filter(
-            and_(
-                Pick.season == season,
-                PickResult.survived == False
-            )
-        ).distinct().subquery()
-
-        remaining_players = db.query(Player).filter(
-            ~Player.player_id.in_(select(eliminated_players.c.player_id))
-        ).count()
+        # Entrants and survivors are scoped to this season's picks so prior
+        # seasons' players are not counted.
+        total_entrants = count_season_entrants(db, season)
+        remaining_players = count_season_survivors(db, season)
 
         # Get picks by week and team
         weeks_data = []
@@ -314,16 +343,12 @@ def get_meme_stats(season: int) -> Dict:
         db.close()
 
 @st.cache_data(ttl=300)  # 5 minute cache for player searches
-def search_players(query: str) -> List[str]:
-    """Search for players by name"""
+def search_players(query: str, season: int) -> List[str]:
+    """Search this season's players by name"""
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
-        players = db.query(Player.display_name).filter(
-            Player.display_name.ilike(f"%{query}%")
-        ).all()
-
-        return [p[0] for p in players]
+        return find_season_players(db, season, query)
 
     finally:
         db.close()
