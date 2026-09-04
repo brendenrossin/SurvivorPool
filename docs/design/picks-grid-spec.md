@@ -1,7 +1,7 @@
 # Weekly Picks Grid — design spec
 
-**Status:** design approved, implementation ~60% done
-**Branch:** `feature/picks-heatmap-redesign`
+**Status:** design approved and locked; module built and tested, not yet wired in
+**Branch:** `feature/picks-heatmap-redesign` (current with `staging`)
 **Mock:** `docs/design/picks-grid-mock.html` (also published as an artifact)
 **Replaces:** the stacked bar chart in `app/main.py::render_weekly_picks_chart`
 
@@ -17,11 +17,11 @@ things are wrong with it:
 2. **The pool collapses.** Entrants go from **252 in week 1 to 19 in week 14**, so
    late weeks render as slivers a few pixels tall. The chart is effectively blank
    for the second half of the season.
-3. **Two concrete bugs.** `height: 300` is fixed and too short
-   (`app/mobile_plotly_config.py:47`), and the hover label sets `bgcolor="white"`
-   and `font_size` but never `font_color` (`:107`) — so Plotly keeps the
-   auto-contrast ink it computed from the dark team fill and renders near-white
-   text on a white background.
+3. **Two concrete bugs.** In `app/mobile_plotly_config.py`, the `bar_chart` entry
+   of `CHART_CONFIGS` pins `'height': 300`, which is fixed and too short; and the
+   `hoverlabel=dict(...)` in `apply_mobile_optimization` sets `bgcolor="white"` and
+   `font_size` but never `font_color` — so Plotly keeps the auto-contrast ink it
+   computed from the dark team fill and renders near-white text on white.
 
 ## What it becomes
 
@@ -107,15 +107,16 @@ the app still renders the old chart and nothing is half-migrated.
 
 1. **Wire it into `main.py`.** Replace the 113-line block from
    `def render_weekly_picks_chart(summary):` through
-   `render_mobile_chart(fig, 'bar_chart')`. Keep everything after it — the
+   `render_mobile_chart(fig, 'bar_chart')` (currently lines 375-487; grep for both
+   anchors rather than trusting those numbers). Keep everything after it — the
    "current week picks breakdown" table below is part of the same function and
    still needed. Build the inputs from `summary["weeks"]`, `get_team_color_map()`
    and `load_team_data()`.
 2. **Add the two Streamlit controls** — count/% and expand — as `st.radio`/
    `st.toggle` above the chart.
-3. **Fix the shared hover config.** `app/mobile_plotly_config.py:107` needs an
-   explicit `font_color`; this fixes the tooltip on *every* chart in the app, not
-   just this one.
+3. **Fix the shared hover config.** The `hoverlabel` block in
+   `apply_mobile_optimization` needs an explicit font colour; this fixes the tooltip
+   on *every* chart in the app, not just this one.
 4. **Height.** The grid sets its own height (`len(rows) * 34 + 120`), so it must not
    be overwritten by `CHART_CONFIGS['bar_chart']['height']` in
    `apply_mobile_optimization`. Either pass a new chart type or have the grid skip
@@ -126,13 +127,38 @@ the app still renders the old chart and nothing is half-migrated.
 
 ### Notes for whoever picks this up
 
-- `tests/conftest.py` lives on `feature/season-rollover-2026` (PR #23), not here.
-  These tests are pure functions and need no fixtures, so they run standalone —
-  but after PR #23 merges, both test files share one directory.
-- `requirements-dev.txt` (pytest) also arrives with PR #23.
-- Run tests with `PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`.
+- Run tests with `NFL_SEASON=2026 PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`.
+  41 pass on this branch: 22 for the grid, 19 inherited from `staging`.
+- `tests/conftest.py` and `requirements-dev.txt` are already here — they merged in
+  with the season-rollover work. The grid's own tests are pure functions and need
+  no fixtures.
+- The design is **settled**. Don't reopen it: muted team colour for history, raw
+  count by default with a `%` toggle, stop at the current week, no row cap, and an
+  expand toggle for every team picked so far. Build what the spec says.
+
+### Testing against real data, post-rollover
+
+The database rolled over to 2026 on 2026-09-04, which changes what live data can
+show you:
+
+- **2026 is nearly empty** — 5 entrants, week 1 only, every game still `pre`. That
+  exercises row padding (3 teams padded to 10 rows) and the pre-season branch of
+  `resolve_current_week` (no started games → falls back to `min(pick_weeks)`), but
+  nothing else.
+- **2025 is still in the database as history** — 1,612 picks, 252 players, 14 weeks.
+  Point `NFL_SEASON=2025` at a local run to exercise the interesting cases: week 1's
+  15 rows, and the late-season collapse to 3 picks that motivated this redesign.
+
+Both seasons live in the same tables; the season lives on `picks`. See the
+"Rolling to a new season" section of `CLAUDE.md`.
 
 ## Out of scope
 
 The same 30-colour problem exists in `app/graveyard.py`, `app/team_of_doom.py` and
-`app/survivors.py`. Deliberately not touched — worth its own ticket.
+`app/survivors.py`. Deliberately not touched — a broader UI overhaul of the other
+plots and tables is planned as its own follow-up branch, and folding it in here
+would make this change impossible to review or revert cleanly.
+
+The one exception is step 3 above: the `mobile_plotly_config.py` hover fix is a
+single line that repairs tooltips app-wide. It ships here because the grid needs
+it anyway and leaving it broken elsewhere would be gratuitous.
