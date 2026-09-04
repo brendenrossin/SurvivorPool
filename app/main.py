@@ -32,6 +32,7 @@ from app.dashboard_data import (
     load_team_data,
     get_summary_data,
     get_started_game_weeks,
+    get_completed_week_count,
     get_player_data,
     get_meme_stats,
     search_players
@@ -199,7 +200,9 @@ def main():
             with k2:
                 kpi("Eliminated Total", f"{eliminated_count:,}", "sent to graveyard", icon="💀")
             with k3:
-                weeks_played = len(summary_preview.get('weeks', []))
+                # Weeks that have been played out, not weeks that have picks -
+                # the sheet is filled in weeks ahead of kickoff.
+                weeks_played = get_completed_week_count(SEASON)
                 kpi("Weeks Completed", f"{weeks_played:,}", "survival rounds", icon="📅")
     except:
         pass
