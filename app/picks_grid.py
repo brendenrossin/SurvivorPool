@@ -10,7 +10,7 @@ Because colour here carries identity rather than magnitude, every cell shows its
 number.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import plotly.graph_objects as go
 
@@ -61,7 +61,44 @@ def select_grid_rows(
     return picked + rest[:fill]
 
 
-def resolve_current_week(pick_weeks, started_game_weeks) -> int:
+def aggregate_picks(
+    summary_weeks: List[Dict], current_week: int
+) -> Tuple[Dict[Tuple[int, str], int], Dict[int, int], Dict[str, int]]:
+    """Roll `summary["weeks"]` up into the grid's three lookups.
+
+    Everything after `current_week` is dropped here, and this is the only place
+    it is dropped: the sheet holds picks for weeks that have not kicked off, and
+    rendering them would publish next week's picks. Because `season_totals` is
+    built from the same clipped pass, a team picked only in a future week cannot
+    reach the grid as a padded row either.
+
+    Args:
+        summary_weeks: [{"week": int, "teams": [{"team": str, "count": int}]}]
+        current_week: the last week that has kicked off
+
+    Returns:
+        ({(week, team): picks}, {week: picks that week}, {team: picks so far})
+    """
+    counts: Dict[Tuple[int, str], int] = {}
+    week_totals: Dict[int, int] = {}
+    season_totals: Dict[str, int] = {}
+
+    for week_data in summary_weeks:
+        week = week_data["week"]
+        if week > current_week:
+            continue
+        for team_item in week_data["teams"]:
+            team, count = team_item["team"], team_item["count"]
+            counts[(week, team)] = counts.get((week, team), 0) + count
+            week_totals[week] = week_totals.get(week, 0) + count
+            season_totals[team] = season_totals.get(team, 0) + count
+
+    return counts, week_totals, season_totals
+
+
+def resolve_current_week(
+    pick_weeks: Iterable[int], started_game_weeks: Iterable[int]
+) -> int:
     """The week the grid should lead with.
 
     Picks are entered in the sheet weeks ahead of kickoff, so the latest week
@@ -84,7 +121,13 @@ def resolve_current_week(pick_weeks, started_game_weeks) -> int:
     if not started:
         return min(pick_weeks)
 
-    return min(max(started), max(pick_weeks))
+    # The latest week that has picks *and* has kicked off. Taking
+    # min(max(started), max(pick_weeks)) instead would return a week that has no
+    # picks whenever the pick weeks have a gap - the grid would then bold a
+    # column that isn't drawn and lead with no full-colour cell at all.
+    kicked_off = max(started)
+    eligible = [w for w in pick_weeks if w <= kicked_off]
+    return max(eligible) if eligible else min(pick_weeks)
 
 
 def _channels(hex_color: str) -> Tuple[int, int, int]:
@@ -109,6 +152,13 @@ def label_ink(hex_color: str) -> str:
     assuming one ink is how the tooltip ended up white-on-white.
     """
     return "#0b0b0b" if relative_luminance(hex_color) > 0.45 else "#ffffff"
+
+
+def _share_label(share: float) -> str:
+    """Percent label that never rounds a real pick down to "0%"."""
+    if 0 < share < 0.5:
+        return "<1%"
+    return f"{share:.0f}%"
 
 
 def mute_color(hex_color: str, background: str, amount: float = HISTORY_MIX) -> str:
@@ -141,7 +191,7 @@ def build_picks_grid(
         weeks: weeks to display, ascending, ending at `current_week`
         rows: ordered team abbreviations (see `select_grid_rows`)
         counts: {(week, team): picks}
-        week_totals: {week: surviving entrants that week}
+        week_totals: {week: picks that week}
         team_colors: {team: hex}
         current_week: the week drawn in full colour
         as_percent: label cells with share of the week instead of raw count
@@ -179,7 +229,7 @@ def build_picks_grid(
 
             annotations.append(dict(
                 x=col_idx, y=row_idx,
-                text=f"{share:.0f}%" if as_percent else str(n),
+                text=_share_label(share) if as_percent else str(n),
                 showarrow=False,
                 font=dict(
                     size=12 if is_now else 11,
@@ -193,7 +243,7 @@ def build_picks_grid(
             hover.append(
                 f"<b>{team_names.get(team, team)}</b><br>"
                 f"Week {week}{' (current)' if is_now else ''}<br>"
-                f"{n} of {total} survivors — {share:.1f}%"
+                f"{n} of {total} picks — {share:.1f}%"
             )
 
     # Invisible markers carry the hover layer; the shapes carry the colour.
@@ -207,6 +257,9 @@ def build_picks_grid(
         shapes=shapes,
         annotations=annotations,
         height=len(rows) * ROW_PX + CHROME_PX,
+        # The margins are a floor, not the budget: `automargin` grows them to fit
+        # the team labels on the left and the week labels along the top. Without
+        # it both are clipped to their last character.
         margin=dict(l=8, r=8, t=8, b=8),
         xaxis=dict(
             side="top", range=[-0.6, len(weeks) - 0.4],
@@ -214,12 +267,12 @@ def build_picks_grid(
             ticktext=[
                 f"<b>W{w}</b>" if w == current_week else f"W{w}" for w in weeks
             ],
-            showgrid=False, zeroline=False, fixedrange=True,
+            showgrid=False, zeroline=False, fixedrange=True, automargin=True,
         ),
         yaxis=dict(
-            autorange="reversed", range=[-0.6, len(rows) - 0.4],
+            range=[len(rows) - 0.4, -0.6],  # reversed explicitly; see note above
             tickmode="array", tickvals=list(range(len(rows))), ticktext=rows,
-            showgrid=False, zeroline=False, fixedrange=True,
+            showgrid=False, zeroline=False, fixedrange=True, automargin=True,
         ),
         # Explicit ink - omitting font colour is what made the old tooltip
         # render near-white on white.

@@ -1,6 +1,7 @@
 # Weekly Picks Grid — design spec
 
-**Status:** design approved and locked; module built and tested, not yet wired in
+**Status:** design approved and locked; built, wired into the dashboard, and verified
+against both seasons
 **Branch:** `feature/picks-heatmap-redesign` (current with `staging`)
 **Mock:** `docs/design/picks-grid-mock.html` (also published as an artifact)
 **Replaces:** the stacked bar chart in `app/main.py::render_weekly_picks_chart`
@@ -89,7 +90,7 @@ pool's final week, which is why it clamps.
 
 ## Implementation status
 
-### Done (committed, 22 tests passing)
+### Done (55 tests passing)
 
 - **`app/picks_grid.py`** — new module:
   - `select_grid_rows(week_counts, season_totals, min_rows=10, expanded=False)`
@@ -97,38 +98,105 @@ pool's final week, which is why it clamps.
   - `label_ink(hex)` / `relative_luminance(hex)` / `mute_color(hex, bg, amount)`
   - `build_picks_grid(...)` → `go.Figure`
 - **`app/dashboard_data.py`** — added `get_started_game_weeks(season)`, cached 60s.
-- **`tests/test_picks_grid.py`** — 22 tests over row selection, ordering,
-  tie-breaking, padding, expansion, contrast, muting, and week resolution.
+- **`tests/test_picks_grid.py`** — 36 tests over row selection, ordering,
+  tie-breaking, padding, expansion, contrast, muting, week resolution, the
+  future-week clamp (`TestAggregatePicks`), cell fills and labels
+  (`TestCellStyling`), and figure layout (`TestFigureLayout`).
 
-`app/main.py` is deliberately **untouched** — the new module is not yet wired in, so
-the app still renders the old chart and nothing is half-migrated.
+- **`app/main.py`** — `render_weekly_picks_chart` now renders the grid; the 113-line
+  stacked-bar block is gone, along with the `plotly.express` import it was the last
+  user of.
 
 ### Remaining
 
-1. **Wire it into `main.py`.** Replace the 113-line block from
-   `def render_weekly_picks_chart(summary):` through
-   `render_mobile_chart(fig, 'bar_chart')` (currently lines 375-487; grep for both
-   anchors rather than trusting those numbers). Keep everything after it — the
-   "current week picks breakdown" table below is part of the same function and
-   still needed. Build the inputs from `summary["weeks"]`, `get_team_color_map()`
-   and `load_team_data()`.
-2. **Add the two Streamlit controls** — count/% and expand — as `st.radio`/
-   `st.toggle` above the chart.
-3. **Fix the shared hover config.** The `hoverlabel` block in
-   `apply_mobile_optimization` needs an explicit font colour; this fixes the tooltip
-   on *every* chart in the app, not just this one.
-4. **Height.** The grid sets its own height (`len(rows) * 34 + 120`), so it must not
-   be overwritten by `CHART_CONFIGS['bar_chart']['height']` in
-   `apply_mobile_optimization`. Either pass a new chart type or have the grid skip
-   mobile layout defaults.
-5. **Verify against real data** — `PYTHONPATH=. streamlit run app/main.py` against
-   the production read replica, checking week 1 (15 rows) and week 14 (3 picks
-   padded to 10).
+All five steps are done.
+
+1. ~~Wire it into `main.py`.~~ `render_weekly_picks_chart` now builds the grid's
+   inputs from `summary["weeks"]`, clamped to the resolved current week. The
+   "Week N Picks Breakdown" table below it is unchanged apart from sharing that
+   resolved week (see below).
+2. ~~The two Streamlit controls~~ — a `Count` / `% of week` radio and a
+   "Show every team picked" toggle, in a two-column row above the grid.
+3. ~~Fix the shared hover config.~~ `apply_mobile_optimization` now sets
+   `font=dict(color="#0F172A", size=12)`; tooltips are legible app-wide.
+4. ~~Height.~~ The grid is rendered with `st.plotly_chart(..., config=get_mobile_config())`
+   rather than `render_mobile_chart`. `CHART_CONFIGS['bar_chart']` would have
+   overwritten not just the height but the axis config the grid depends on
+   (reversed y, array tickvals), so the grid skips the layout defaults entirely
+   and keeps only the shared interaction config.
+5. ~~Verify against real data.~~ Confirmed against the production database,
+   read-only. See below.
+
+#### Two things the wiring changed beyond the chart itself
+
+- **The breakdown table shares the grid's week.** It used to derive its own week as
+  `max(latest pick week, latest game week)`. For 2025 that is week 16 — the schedule
+  outruns the pool's 14 weeks — so the table found no matching week and fell through
+  to "No picks uploaded to Google Sheet Tracker yet". It now reads Week 14, and the
+  table can no longer disagree with the column the grid highlights.
+- **A closed session was being reused.** The table's game-status query ran on the
+  session the week-derivation block had already closed in its `finally`. That block
+  is gone; the query now opens and closes its own session.
+
+#### Verified against the production database (read-only)
+
+| Case | Result |
+|---|---|
+| 2025, current week 14 | 3 teams picked, padded to 10 rows, 14 columns, W14 bolded |
+| 2025, current week 1 (simulated) | 15 rows, no cap applied |
+| 2025, current week 3 (simulated) | 9 teams padded to 10 |
+| 2026 live | 5 entrants, no started games → falls back to week 1 |
+| Future-week leakage | 0 cells past the current week in every case |
+| Height | `len(rows) * 34 + 120` in every case; shapes == annotations == drawn cells |
+
+The whole app also runs clean headless via `streamlit.testing.v1.AppTest` against
+both seasons, with both controls flipped.
+
+#### Tri-review changes
+
+A three-persona review ran before the PR. What it changed, beyond the wiring:
+
+- **`aggregate_picks()` moved into `picks_grid.py`.** All three reviewers
+  independently flagged that the future-week clamp — the rule this whole design
+  rests on — lived in the Streamlit view function where no test could reach it.
+  Deleting the clamp used to pass the entire suite. It is now a pure function
+  with its own tests, including one asserting a future-only team cannot arrive
+  as a padded row.
+- **The denominator is "picks", not "survivors".** Eliminated entrants keep
+  filling in the sheet: 2025 week 4 has 237 picks from 171 still-alive players.
+  `week_totals` was the sum of picks while the tooltip called it survivors, so
+  every `% of week` share was understated (a 20-pick team read 8.4% instead of
+  11.7%). The wording now matches the arithmetic. Making the *numbers* survivor-
+  aware is a real change to what the grid measures and is on the roadmap.
+- **`resolve_current_week` could return a week with no picks.**
+  `min(max(started), max(pick_weeks))` is only bounded by the pick weeks, not a
+  member of them: `pick_weeks=[1,3]`, `started=[1,2]` returned 2. It now takes
+  the latest pick week at or before kickoff.
+- **`autorange="reversed"` was silently discarding the explicit y `range`**
+  beside it, so row padding came from the invisible hover markers rather than
+  the half-cell geometry the code stated.
+- **`"{:.0f}%"` rendered a real pick as `0%`** — one picker out of 252 is 0.4%.
+  Now `<1%`.
+- **Columns are `1..current_week`,** per this spec. They were the weeks that
+  *have* picks, which silently closed gaps and put W1 next to W3.
+- **Failures in the breakdown table are logged and named.** Every exception —
+  database outage included — was reported to the user as "No picks uploaded to
+  Google Sheet Tracker yet", with nothing in the Railway logs.
+
+Two findings were escalated rather than applied, because they change the
+product rather than the code: the pre-season fallback (below) and the
+Thursday-kickoff reveal, where one Thursday game promotes the whole week and
+publishes Sunday's picks ~3 days early. Both are recorded in the backlog.
+
+One correction to this spec's own expectation: 2026 renders **3 rows, not 10**.
+`select_grid_rows` pads from teams picked in *earlier* weeks, and in 2026 every
+team picked is in the current week, so there is nothing to pad with. Padding needs
+history; it is exercised properly by 2025.
 
 ### Notes for whoever picks this up
 
 - Run tests with `NFL_SEASON=2026 PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`.
-  41 pass on this branch: 22 for the grid, 19 inherited from `staging`.
+  55 pass on this branch: 36 for the grid, 19 inherited from `staging`.
 - `tests/conftest.py` and `requirements-dev.txt` are already here — they merged in
   with the season-rollover work. The grid's own tests are pure functions and need
   no fixtures.
@@ -151,6 +219,15 @@ show you:
 
 Both seasons live in the same tables; the season lives on `picks`. See the
 "Rolling to a new season" section of `CLAUDE.md`.
+
+### Known, accepted: the pre-season reveal
+
+Before any game has started, `resolve_current_week` falls back to
+`min(pick_weeks)` and the grid renders week 1 — an unplayed week — which sits
+awkwardly beside the decision table's reason for hiding future weeks. It is not
+a regression (the old stacked bar showed every week with no clamp at all), and
+the alternative is rendering nothing until first kickoff. Flagged, deliberately
+kept, revisit before the 2027 season.
 
 ## Out of scope
 

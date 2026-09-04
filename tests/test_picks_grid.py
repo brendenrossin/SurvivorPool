@@ -7,6 +7,8 @@ ordered by that week's count, padded out with the season's most-picked teams.
 import pytest
 
 from app.picks_grid import (
+    aggregate_picks,
+    build_picks_grid,
     label_ink,
     mute_color,
     resolve_current_week,
@@ -127,3 +129,120 @@ class TestResolveCurrentWeek:
 
     def test_no_picks_at_all(self):
         assert resolve_current_week(pick_weeks=[], started_game_weeks=[]) == 1
+
+
+class TestFigureLayout:
+    """The grid computes its own height and label room. Both were shipped wrong
+    once - the height by routing through CHART_CONFIGS, the labels by trusting
+    an 8px margin - so they get asserted rather than eyeballed."""
+
+    def _figure(self, rows, weeks):
+        counts = {(w, t): 1 for w in weeks for t in rows}
+        return build_picks_grid(
+            weeks=weeks, rows=rows, counts=counts,
+            week_totals={w: len(rows) for w in weeks},
+            team_colors={t: "#004C54" for t in rows},
+            current_week=weeks[-1],
+        )
+
+    def test_height_scales_with_row_count(self):
+        assert self._figure(["PHI", "ARI"], [1]).layout.height == 2 * 34 + 120
+        assert self._figure(["PHI"] * 10, [1]).layout.height == 10 * 34 + 120
+
+    def test_axes_claim_room_for_their_labels(self):
+        """Team abbreviations and week headers are clipped to a single
+        character without this - the margins are only an 8px floor."""
+        fig = self._figure(["PHI", "ARI"], [1, 2])
+        assert fig.layout.yaxis.automargin is True
+        assert fig.layout.xaxis.automargin is True
+
+    def test_current_week_header_is_emphasised(self):
+        fig = self._figure(["PHI"], [1, 2, 3])
+        assert list(fig.layout.xaxis.ticktext) == ["W1", "W2", "<b>W3</b>"]
+
+
+class TestAggregatePicks:
+    """The clamp that stops unplayed weeks reaching the grid. Nothing tested it
+    while it lived in main.py - deleting it passed the whole suite."""
+
+    WEEKS = [
+        {"week": 1, "teams": [{"team": "DEN", "count": 93}, {"team": "ARI", "count": 53}]},
+        {"week": 2, "teams": [{"team": "DEN", "count": 40}]},
+        {"week": 3, "teams": [{"team": "KC", "count": 12}]},
+    ]
+
+    def test_drops_weeks_that_have_not_kicked_off(self):
+        counts, week_totals, _ = aggregate_picks(self.WEEKS, current_week=2)
+        assert set(counts) == {(1, "DEN"), (1, "ARI"), (2, "DEN")}
+        assert week_totals == {1: 146, 2: 40}
+
+    def test_a_future_only_team_cannot_reach_the_grid_as_a_padded_row(self):
+        """KC is picked in week 3 only. With current_week=2 it must not appear
+        in season_totals, or select_grid_rows would pad it in as a blank row -
+        revealing that someone has taken KC next week."""
+        _, _, season_totals = aggregate_picks(self.WEEKS, current_week=2)
+        assert "KC" not in season_totals
+        assert season_totals == {"DEN": 133, "ARI": 53}
+        assert "KC" not in select_grid_rows({"DEN": 40}, season_totals)
+
+    def test_totals_span_every_visible_week(self):
+        _, _, season_totals = aggregate_picks(self.WEEKS, current_week=3)
+        assert season_totals == {"DEN": 133, "ARI": 53, "KC": 12}
+
+    def test_no_visible_weeks(self):
+        assert aggregate_picks(self.WEEKS, current_week=0) == ({}, {}, {})
+
+
+class TestCellStyling:
+    """Colour carries identity and emphasis here, so the current week's fill and
+    the muted history are a contract, not a detail."""
+
+    def _fills(self, as_percent=False):
+        fig = build_picks_grid(
+            weeks=[1, 2], rows=["DEN"],
+            counts={(1, "DEN"): 1, (2, "DEN"): 200},
+            week_totals={1: 252, 2: 400},
+            team_colors={"DEN": "#FB4F14"}, current_week=2,
+            as_percent=as_percent, background="#ffffff",
+        )
+        return fig
+
+    def test_current_week_keeps_the_true_team_colour(self):
+        shapes = self._fills().layout.shapes
+        assert shapes[1].fillcolor == "#FB4F14"
+
+    def test_earlier_weeks_are_muted_toward_the_surface(self):
+        shapes = self._fills().layout.shapes
+        assert shapes[0].fillcolor == mute_color("#FB4F14", "#ffffff")
+        assert shapes[0].fillcolor != "#FB4F14"
+
+    def test_a_single_picker_is_not_labelled_zero_percent(self):
+        """1 of 252 is 0.4%, which "{:.0f}%" renders as "0%" in a cell that
+        exists because it is not zero."""
+        labels = [a.text for a in self._fills(as_percent=True).layout.annotations]
+        assert labels == ["<1%", "50%"]
+
+    def test_counts_are_the_default_label(self):
+        labels = [a.text for a in self._fills().layout.annotations]
+        assert labels == ["1", "200"]
+
+    def test_empty_cells_are_not_drawn(self):
+        fig = build_picks_grid(
+            weeks=[1, 2], rows=["DEN", "KC"], counts={(1, "DEN"): 5},
+            week_totals={1: 5}, team_colors={"DEN": "#FB4F14", "KC": "#E31837"},
+            current_week=2,
+        )
+        assert len(fig.layout.shapes) == len(fig.layout.annotations) == 1
+
+
+class TestResolveCurrentWeekWithGaps:
+    """A gap in the pick weeks used to resolve to a week that had no picks at
+    all - the grid would bold a column it never drew."""
+
+    def test_falls_back_to_the_latest_week_that_actually_has_picks(self):
+        assert resolve_current_week(pick_weeks=[1, 3], started_game_weeks=[1, 2]) == 1
+
+    def test_the_resolved_week_always_has_picks(self):
+        for started in ([1], [1, 2], [1, 2, 3], range(1, 19)):
+            week = resolve_current_week(pick_weeks=[1, 3, 5], started_game_weeks=started)
+            assert week in (1, 3, 5)

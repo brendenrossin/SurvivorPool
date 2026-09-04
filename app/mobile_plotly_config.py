@@ -108,7 +108,9 @@ def apply_mobile_optimization(fig, chart_type='default'):
             hoverlabel=dict(
                 bgcolor="white",
                 bordercolor="black",
-                font_size=12
+                # Explicit ink: without it Plotly keeps the auto-contrast colour
+                # it computed from the trace fill, rendering white on white.
+                font=dict(color="#0F172A", size=12)
             )
         )
 
