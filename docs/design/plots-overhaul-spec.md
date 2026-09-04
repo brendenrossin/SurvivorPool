@@ -24,7 +24,8 @@ Three things the codebase adds to that, found before designing:
 2. **None of these modules cache their database reads,** and `st.tabs` executes all
    four tab bodies on every script run. `survivors.py` is a `2N + 2` N+1;
    `chaos_meter.py` issues three queries per week in a loop (42 round trips for 2025).
-3. **~190 lines across the four modules are dead** — zero call sites. Two would raise
+3. **103 emoji across five files**, in headings, labels and every table row.
+4. **~190 lines across the four modules are dead** — zero call sites. Two would raise
    if reached: `render_weekly_chaos_summary` calls `calculate_chaos_score`, which does
    not exist.
 
@@ -171,6 +172,35 @@ optional garnish rather than the headline.
 - **Elimination Tracker** — **the gauge is deleted.** It is the most dated object in
   the app. Replaced by a large numeral plus the attrition curve with the current week
   marked, reusing `attrition.py` rather than introducing a fifth chart idiom.
+
+### Emoji: removed, not reduced
+
+There are **103 emoji across the five files this branch touches**. They are a large
+part of why the app reads as dated, and they fight the broadcast direction directly:
+`### 💀 Team of Doom` cannot sit in the same design language as an oversized numeral
+on a slate field.
+
+The rule applied here:
+
+- **No emoji in headings, section titles, metric labels, or as row decoration.**
+  `⚰️ Graveyard Board` becomes `GRAVEYARD` — uppercase, letterspaced, in the muted
+  ink token. `💀 {player}` in a table row becomes `{player}`; the section already
+  says what these rows are.
+- **Where an emoji encoded status, it becomes a colour-coded text badge**, not
+  another glyph. `🐕` / `🛣️` on a Big Balls card become `UNDERDOG` / `ROAD`.
+  `✅ Won` / `⏳ Pending` become a coloured dot plus the word.
+- **Empty-state messages lose their leading emoji too** — the §7 messages are plain
+  sentences.
+
+Two reasons beyond taste. Screen readers announce every emoji by name, so a table
+with a skull per row reads as "skull" 251 times. And emoji render with the platform's
+own colours, which no amount of theming controls — a full-colour glyph is the one
+thing on the page that ignores the token system entirely.
+
+**Scope note:** this covers this branch's files only. Session B's live-scores and
+picks-grid regions keep theirs, so the app will be briefly inconsistent between their
+merge and this one. Worth raising with them at reconciliation rather than editing
+their files here.
 
 ### Empty states
 
