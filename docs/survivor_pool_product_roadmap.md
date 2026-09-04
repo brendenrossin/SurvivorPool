@@ -206,6 +206,14 @@ that is live in production today, not the SaaS build-out.
       `team_of_doom.py`, `survivors.py` share the 30-colour problem, and none of
       the widget modules cache their database reads (`survivors.py` is an N+1).
       See `docs/optimizations/picks-grid-backlog.md`.
+- [ ] **Live scores should roll forward on Tuesday.** Once Monday's games are
+      final, the widget should show the *next* week's games — still filtered to
+      teams somebody has picked. Carried over from the 2025-09-18 working notes;
+      never implemented.
+- [ ] **Every empty state needs its own message.** Each plot, card and table
+      should explain *why* it has nothing to show rather than rendering blank or
+      a generic line. Carried over from the same notes; partially done (the
+      picks grid and breakdown table have theirs, most widgets do not).
 - [ ] **Work through the picks-grid review backlog** —
       `docs/optimizations/picks-grid-backlog.md`.
 
