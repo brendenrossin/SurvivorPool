@@ -63,6 +63,28 @@ def find_season_players(db, season: int, query: str):
     return [r[0] for r in rows]
 
 
+@st.cache_data(ttl=60)
+def get_started_game_weeks(season: int) -> List[int]:
+    """Weeks with at least one game underway or finished.
+
+    Picks are entered in the sheet weeks ahead of kickoff, so this - not the
+    latest week holding a pick - is what tells us which week is live.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        rows = db.query(Game.week).filter(
+            Game.season == season,
+            Game.status != "pre"
+        ).distinct().all()
+        return sorted(r[0] for r in rows)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows
 def get_summary_data(season: int) -> Dict:
     """Get summary data for dashboard"""

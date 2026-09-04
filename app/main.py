@@ -14,7 +14,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"  # Better for mobile
 )
 
-import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime
@@ -32,16 +31,24 @@ print("✅ Streamlit app starting...")
 from app.dashboard_data import (
     load_team_data,
     get_summary_data,
+    get_started_game_weeks,
     get_player_data,
     get_meme_stats,
     search_players
+)
+from app.picks_grid import (
+    MIN_ROWS,
+    aggregate_picks,
+    build_picks_grid,
+    resolve_current_week,
+    select_grid_rows,
 )
 from app.live_scores import render_live_scores_widget, render_compact_live_scores
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
-from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
+from app.mobile_plotly_config import render_mobile_chart, get_mobile_config, get_mobile_color_scheme
 from app.odds_helpers import get_underdog_spread_text
 
 # Load environment
@@ -50,6 +57,9 @@ load_dotenv()
 
 # Configuration
 SEASON = int(os.getenv("NFL_SEASON", 2025))
+# Kept in step with the .stApp background in the CSS block below.
+APP_SURFACE = "#F8FAFC"
+COUNT_LABEL, PERCENT_LABEL = "Count", "% of week"
 team_data = load_team_data()
 
 def main():
@@ -367,155 +377,80 @@ def render_remaining_players_donut(summary):
     # Render with mobile optimization
     render_mobile_chart(fig, 'donut')
 
+@st.cache_data
 def get_team_color_map():
     """Get centralized team color mapping"""
     team_data = load_team_data()
     return {team: data.get("color", "#666666") for team, data in team_data["teams"].items()}
 
+@st.cache_data
+def get_team_name_map():
+    """Full team names, for tooltips."""
+    team_data = load_team_data()
+    return {team: data.get("name", team) for team, data in team_data["teams"].items()}
+
 def render_weekly_picks_chart(summary):
-    """Render stacked bar chart for weekly picks"""
+    """Render the team x week picks grid, leading with the current week."""
 
     if not summary["weeks"]:
         st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
         return
 
-    # Get centralized color map
-    color_map = get_team_color_map()
+    pick_weeks = sorted(w["week"] for w in summary["weeks"])
 
-    # Prepare data for stacked bar chart
-    chart_data = []
-    for week_data in summary["weeks"]:
-        week = week_data["week"]
-        for team_item in week_data["teams"]:
-            team = team_item["team"]
-            count = team_item["count"]
+    # The sheet holds picks for unplayed weeks, so the latest week with a pick
+    # is not "now" - resolve against the weeks whose games have actually
+    # started, and never aggregate past that or we leak next week's picks.
+    current_week = resolve_current_week(pick_weeks, get_started_game_weeks(SEASON))
+    weeks = list(range(1, current_week + 1))  # spec: columns are 1..current_week
 
-            chart_data.append({
-                "Week": f"Week {week}",
-                "Week_Num": week,  # Keep numeric week for proper sorting
-                "Team": team,
-                "Count": count
-            })
-
-    if not chart_data:
+    counts, week_totals, season_totals = aggregate_picks(
+        summary["weeks"], current_week
+    )
+    if not counts:
         st.info("No picks data to display")
         return
 
-    df = pd.DataFrame(chart_data)
+    st.markdown("### 📊 Team Picks by Week")
 
-    # Get overall team order by total count (largest first for bottom stacking)
-    team_totals = df.groupby('Team')['Count'].sum().sort_values(ascending=False)
-    team_order = team_totals.index.tolist()
+    control_left, control_right = st.columns([2, 3])
+    with control_left:
+        label_mode = st.radio(
+            "Cell labels",
+            [COUNT_LABEL, PERCENT_LABEL],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="picks_grid_format",
+        )
+    with control_right:
+        expanded = st.toggle(
+            "Show every team picked",
+            key="picks_grid_expanded",
+            help=f"Drop the {MIN_ROWS}-row floor and list every team picked so far",
+        )
+    as_percent = label_mode == PERCENT_LABEL
 
-    # CRITICAL: For proper stacking order, we need to sort by team order WITHIN each week
-    # Plotly stacks in the order data appears in DataFrame, not category_orders
-    df_for_stacking = []
-    for week_num in sorted(df['Week_Num'].unique()):
-        week_data = df[df['Week_Num'] == week_num]
+    week_counts = {t: n for (w, t), n in counts.items() if w == current_week}
+    rows = select_grid_rows(week_counts, season_totals, expanded=expanded)
 
-        # Sort this week's data by team_order (largest total teams first = bottom of stack)
-        for team in team_order:
-            team_row = week_data[week_data['Team'] == team]
-            if not team_row.empty:
-                df_for_stacking.append(team_row.iloc[0])
-
-    df_sorted = pd.DataFrame(df_for_stacking)
-
-    # Create stacked bar chart with proper ordering
-    fig = px.bar(
-        df_sorted,
-        x="Week",
-        y="Count",
-        color="Team",
-        color_discrete_map=color_map,  # Use centralized color map
-        title="📊 Team Picks by Week",
-        category_orders={
-            "Week": [f"Week {i}" for i in sorted(df['Week_Num'].unique())],  # Force numeric week order
-            "Team": team_order  # Largest totals first (bottom of stack)
-        }
+    fig = build_picks_grid(
+        weeks=weeks,
+        rows=rows,
+        counts=counts,
+        week_totals=week_totals,
+        team_colors=get_team_color_map(),
+        current_week=current_week,
+        as_percent=as_percent,
+        background=APP_SURFACE,
+        team_names=get_team_name_map(),
     )
 
-    # Calculate proper annotation positions for stacked bars - mobile optimized
-    week_annotations = []
-    # Process weeks in proper numeric order
-    for week_num in sorted(df['Week_Num'].unique()):
-        week_label = f"Week {week_num}"
+    # Deliberately not render_mobile_chart: CHART_CONFIGS would overwrite the
+    # grid's computed height and its axis config with the bar-chart defaults.
+    st.plotly_chart(fig, use_container_width=True, config=get_mobile_config())
 
-        # Get data for this week sorted by team order (same as stacking order)
-        week_data = df_sorted[df_sorted["Week"] == week_label]
-
-        # Sort by the same team order used in the chart (largest totals first = bottom)
-        week_data_ordered = []
-        for team in team_order:
-            team_row = week_data[week_data["Team"] == team]
-            if not team_row.empty:
-                week_data_ordered.append(team_row.iloc[0])
-
-        cumulative_y = 0
-
-        # Get top-3 teams by count for this specific week (for mobile optimization)
-        week_teams_by_count = sorted(week_data_ordered, key=lambda x: x["Count"], reverse=True)
-        top_3_teams = set([team["Team"] for team in week_teams_by_count[:3]])
-
-        for row in week_data_ordered:
-            # Only annotate top-3 teams with minimum threshold
-            if row["Team"] in top_3_teams and row["Count"] >= 5:
-                # Position text at center of this team's bar segment
-                y_center = cumulative_y + (row["Count"] / 2)
-
-                week_annotations.append({
-                    "x": week_label,
-                    "y": y_center,
-                    "text": row["Team"]
-                })
-
-            cumulative_y += row["Count"]
-
-    # Add mobile-friendly annotations with better contrast
-    if week_annotations:
-        fig.add_scatter(
-            x=[ann["x"] for ann in week_annotations],
-            y=[ann["y"] for ann in week_annotations],
-            text=[ann["text"] for ann in week_annotations],
-            mode="text",
-            textfont=dict(size=9, color="white", family="Arial Black"),
-            showlegend=False,
-            hoverinfo="skip"
-        )
-
-    # Use mobile optimization
-    render_mobile_chart(fig, 'bar_chart')
-
-    # Add current week picks table
+    # Add current week picks table, on the same week the grid leads with
     try:
-        from api.database import SessionLocal
-        from api.models import Game, Pick
-
-        # Get current week from database
-        # Use the latest week with picks (not games), so we show Week 5 picks
-        # even if Week 5 games haven't started yet
-        db = SessionLocal()
-        try:
-            # Check latest week with picks
-            latest_pick_week = db.query(Pick.week).filter(
-                Pick.season == SEASON
-            ).order_by(Pick.week.desc()).first()
-
-            # Also check latest week with games
-            latest_game_week = db.query(Game.week).filter(
-                Game.season == SEASON
-            ).order_by(Game.week.desc()).first()
-
-            # Use whichever is higher (picks or games)
-            pick_week = latest_pick_week.week if latest_pick_week else 1
-            game_week = latest_game_week.week if latest_game_week else 1
-            current_week = max(pick_week, game_week)
-        finally:
-            try:
-                db.close()
-            except:
-                pass
-
         # Find current week's data in summary
         current_week_data = None
         for week_data in summary["weeks"]:
@@ -528,17 +463,24 @@ def render_weekly_picks_chart(summary):
         if current_week_data and current_week_data["teams"]:
             # Get team game status for styling
             try:
-                from api.models import Game, Pick, PickResult
-                from sqlalchemy import text
+                from api.database import SessionLocal
+                from api.models import Game
                 losing_teams = set()  # Teams that lost, tied, or caused eliminations (💀)
                 winning_teams = set()  # Teams that won their games (✅)
                 pending_teams = set()  # Teams with games not started yet (🕐)
 
                 # Find all teams with games in current week
-                week_games = db.query(Game).filter(
-                    Game.week == current_week,
-                    Game.season == SEASON
-                ).all()
+                db = SessionLocal()
+                try:
+                    week_games = db.query(Game).filter(
+                        Game.week == current_week,
+                        Game.season == SEASON
+                    ).all()
+                finally:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
 
                 for game in week_games:
                     if game.status == 'final' and game.home_score is not None and game.away_score is not None:
@@ -564,6 +506,8 @@ def render_weekly_picks_chart(summary):
                 # This ensures emojis reflect current game status, not stale elimination data
 
             except Exception as e:
+                logging.exception("Week %s game status lookup failed", current_week)
+                st.warning(f"⚠️ Game results unavailable: {e}")
                 losing_teams = set()
                 winning_teams = set()
                 pending_teams = set()
@@ -598,7 +542,10 @@ def render_weekly_picks_chart(summary):
             st.info("📝 No picks uploaded to Google Sheet Tracker yet")
 
     except Exception as e:
-        st.info("📝 No picks uploaded to Google Sheet Tracker yet")
+        # Reserve the "nothing uploaded" message for the genuine empty case
+        # handled above; a real failure gets logged and named.
+        logging.exception("Picks breakdown table failed to render")
+        st.warning(f"⚠️ Couldn't build the picks breakdown: {e}")
 
 def render_player_search():
     """Render player search section"""
