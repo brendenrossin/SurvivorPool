@@ -6,7 +6,7 @@
 - **Tech Stack**: Streamlit + PostgreSQL + Railway hosting
 - **Architecture**: MVP with cron jobs for data ingestion
 - **Status**: 95% MVP complete and fully functional
-- **URL**: https://nfl-survivor-2025.up.railway.app/
+- **URL**: https://nfl-survivor-2026.up.railway.app/
 
 ## 🏗️ Architecture & Design Patterns
 
@@ -367,8 +367,11 @@ is NOT the live app:
 | staging | `staging` | `nfl-survivor-2025`, `Sheets-Cron`, `Scores-Cron`, `Odds-Cron`, `Postgres` |
 | Dev | `feature/multi-league` | `Web-Dev`, `postgres-dev` |
 
-- **`https://nfl-survivor-2025.up.railway.app/` is the PRODUCTION service and deploys from `main`.**
-  Merging to `main` is a live deploy — never fast-forward `main` casually.
+- **`https://nfl-survivor-2026.up.railway.app/` is the PRODUCTION service and deploys
+  from `main`.** Merging to `main` is a live deploy — never fast-forward `main`
+  casually. The *service* is still named `nfl-survivor-2025` in both environments;
+  only the domain was renamed. Don't rename the service to match — that is what the
+  `--service` flag targets.
 - production and staging have **separate Postgres instances**. The production DB is
   reachable at `ballast.proxy.rlwy.net`; staging at `mainline.proxy.rlwy.net`.
   Check which host `DATABASE_PUBLIC_URL` points at before running any query.
@@ -388,6 +391,13 @@ Ingestion clears only the target season (`clear_season_data()` in
 a season-independent identity table — the season lives on `picks`, so any query that
 starts from `players` must be narrowed through the season's picks, or it counts every
 player who has ever entered the pool.
+
+**A new sheet needs sharing with the service account**, not with you:
+`survivorpool-sheets@nflsurvivorpool.iam.gserviceaccount.com` (Viewer is enough).
+Verify before flipping the vars — the tab must be named `Picks` to match
+`GOOGLE_SHEETS_PICKS_RANGE`, and headers must be exactly `Name` and `Week N`;
+`parse_picks_data()` in `jobs/sheets_ingestion_shared.py` matches `Week ` + digits
+literally and silently ignores any column it doesn't recognise.
 
 ## 🎯 MVP vs Future Features
 

@@ -2,11 +2,13 @@
 Survivor Pool Dashboard - Streamlit App
 """
 
+import os
+
 import streamlit as st
 
 # Configure Streamlit FIRST, before any other imports that might trigger Streamlit
 st.set_page_config(
-    page_title="Survivor 2025 - Live Dashboard",
+    page_title=f"Survivor {os.getenv('NFL_SEASON', 2025)} - Live Dashboard",
     page_icon="🏈",
     layout="wide",
     initial_sidebar_state="collapsed"  # Better for mobile
@@ -607,7 +609,7 @@ def render_player_search():
 
     if search_query:
         # Search for matching players
-        matching_players = search_players(search_query)
+        matching_players = search_players(search_query, SEASON)
 
         if matching_players:
             selected_player = st.selectbox("Select player:", matching_players)
