@@ -80,3 +80,11 @@ class TestDecideWeekResults:
         """2025 week 14: 14 games, 28 teams, all final."""
         games = [("final", f"H{i}", f"A{i}", 20 + i, 10) for i in range(14)]
         assert len(decide_week_results(games)) == 28
+
+    def test_a_decided_verdict_is_never_overwritten_by_a_pending_one(self):
+        """Duplicate rows for one team - a rescheduled game left in the table -
+        must not downgrade a settled result to pending, in either order."""
+        decided = ("final", "TB", "NO", 20, 24)
+        pending = ("pre", "TB", "NO", None, None)
+        assert decide_week_results([decided, pending])["TB"] == "lost"
+        assert decide_week_results([pending, decided])["TB"] == "lost"

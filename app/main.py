@@ -28,6 +28,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print("🚀 Starting Survivor Pool Dashboard...")
 print("✅ Streamlit app starting...")
 
+from api.database import SessionLocal
 from app.dashboard_data import (
     load_team_data,
     get_summary_data,
@@ -50,7 +51,11 @@ from app.picks_grid import (
     resolve_current_week,
     select_grid_rows,
 )
-from app.live_scores import render_live_scores_widget, resolve_scoreboard_week
+from app.live_scores import (
+    render_live_scores_widget,
+    resolve_scoreboard_week,
+    should_reveal_picks,
+)
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
@@ -222,19 +227,25 @@ def main():
     # because that is the last week whose picks may be published; the scoreboard
     # rolls forward once that week has finished.
     try:
-        summary_preview = get_summary_data(SEASON)
+        started_weeks = get_started_game_weeks(SEASON)
         week_statuses = get_week_game_statuses(SEASON)
         played_week = resolve_current_week(
-            sorted(w["week"] for w in summary_preview["weeks"]) or [1],
-            get_started_game_weeks(SEASON),
+            sorted(w["week"] for w in get_summary_data(SEASON)["weeks"]) or [1],
+            started_weeks,
         )
         scoreboard_week = resolve_scoreboard_week(played_week, week_statuses)
         render_live_scores_widget(
-            SEASON, scoreboard_week, reveal_picks=scoreboard_week <= played_week
+            SEASON, scoreboard_week,
+            # Asked of the scoreboard's own week, never derived by comparing it
+            # against the grid's - see should_reveal_picks.
+            reveal_picks=should_reveal_picks(scoreboard_week, started_weeks),
         )
-    except Exception as e:
+    except Exception:
+        # The detail goes to the Railway logs. Rendering str(e) here publishes
+        # the production database host and user to every pool member the first
+        # time Postgres refuses a connection.
         logging.exception("Live scores failed to render")
-        st.info(f"🏈 Live scores are unavailable right now: {e}")
+        st.info("🏈 Live scores are unavailable right now.")
 
     st.divider()
 
@@ -300,8 +311,9 @@ def main():
                     db.close()
                 except:
                     pass
-        except Exception as e:
-            st.info("💀 Team of Doom will appear once eliminations start happening!")
+        except Exception:
+            logging.exception("💀 Team of Doom failed to render")
+            st.info("💀 Team of Doom is unavailable right now.")
 
     with tab2:
         try:
@@ -313,8 +325,9 @@ def main():
                     db.close()
                 except:
                     pass
-        except Exception as e:
-            st.info("✨ Survivors will appear once picks are made!")
+        except Exception:
+            logging.exception("✨ Survivors failed to render")
+            st.info("✨ Survivors is unavailable right now.")
 
     with tab3:
         try:
@@ -326,8 +339,9 @@ def main():
                     db.close()
                 except:
                     pass
-        except Exception as e:
-            st.info("⚰️ Graveyard will fill up as players get eliminated!")
+        except Exception:
+            logging.exception("⚰️ Graveyard failed to render")
+            st.info("⚰️ Graveyard is unavailable right now.")
 
     with tab4:
         try:
@@ -339,8 +353,9 @@ def main():
                     db.close()
                 except:
                     pass
-        except Exception as e:
-            st.info("📊 Elimination Tracker will activate once eliminations begin!")
+        except Exception:
+            logging.exception("📊 Elimination Tracker failed to render")
+            st.info("📊 Elimination Tracker is unavailable right now.")
 
     # Footer with update times
     render_footer(summary.get("last_updates", {}))

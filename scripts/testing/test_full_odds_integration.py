@@ -11,7 +11,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from api.database import SessionLocal
 from api.models import Game
 from app.dashboard_data import get_meme_stats
-from app.live_scores import get_live_scores_data
+from app.dashboard_data import get_week_scoreboard
+from app.live_scores import build_scoreboard
 
 def test_complete_integration():
     """Test all components of the odds integration"""
@@ -56,16 +57,18 @@ def test_complete_integration():
     # Test 3: Live Scores with Spreads
     print("\n3️⃣ Testing Live Scores with Spreads...")
     try:
-        db = SessionLocal()
-        live_scores = get_live_scores_data(db, 2025, 3)
+        data = get_week_scoreboard(2025, 3)
+        cards = build_scoreboard(
+            data["games"], data["pick_counts"], data["results"], reveal_picks=True
+        )
 
-        print(f"   Found {len(live_scores)} live games")
+        print(f"   Found {len(cards)} cards")
 
-        for game in live_scores[:2]:
-            print(f"   - {game['away_team']} @ {game['home_team']}: {game['score_display']}")
+        for card in cards[:2]:
+            line = card["line"] or "no line"
+            print(f"   - {card['away']['team']} @ {card['home']['team']}: {line}")
 
         print("✅ Live Scores with spreads working")
-        db.close()
     except Exception as e:
         print(f"❌ Live Scores test failed: {e}")
         success = False

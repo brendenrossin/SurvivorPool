@@ -9,7 +9,7 @@ Data comes from the database only. API calls happen in the cron jobs.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import pytz
 import streamlit as st
@@ -19,8 +19,12 @@ from app.odds_helpers import format_pregame_line
 
 PACIFIC = pytz.timezone("America/Los_Angeles")
 
-# Live first, then upcoming, then settled. Within a status, games with entrants
-# on them come before games nobody picked.
+# Live first, then upcoming, then settled; within a status, by kickoff.
+#
+# There is deliberately no "picked games first" tiebreak: has_picks is uniform
+# across every card in each reachable state. When picks are revealed and any
+# exist, the filter has already dropped the games nobody picked; otherwise no
+# card carries picks at all. A tiebreak on it could never discriminate.
 STATUS_ORDER = {"in": 0, "pre": 1, "final": 2}
 
 
@@ -46,7 +50,35 @@ def resolve_scoreboard_week(
     return current_week + 1 if (current_week + 1) in week_statuses else current_week
 
 
-def _side(team: str, score, winner, status: str, picks: int) -> Dict[str, Any]:
+def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> bool:
+    """Whether the scoreboard may show pick data for `scoreboard_week`.
+
+    A week reveals its picks if and only if one of its OWN games has left
+    'pre'. Stated that way the invariant is local and unconditional, which is
+    the point: the first version derived it by comparing the scoreboard's week
+    against the grid's, and that ordering is satisfied in exactly the case it
+    most needed to exclude. Before any game of the season has started,
+    resolve_current_week falls back to the first week holding picks rather than
+    reporting "nothing has started", so both weeks were 1 and 1 <= 1 published
+    the entire field's week 1 picks days before kickoff.
+    """
+    return scoreboard_week in set(started_weeks)
+
+
+def _as_utc(moment: Optional[datetime]) -> Optional[datetime]:
+    """Attach UTC to a naive timestamp; convert - never overwrite - an aware one.
+
+    Postgres returns aware datetimes for Game.kickoff, SQLite (the local dev
+    path) returns naive ones. `.replace(tzinfo=utc)` is right for the second
+    and silently wrong for the first the moment the session TimeZone is not UTC.
+    """
+    if moment is None:
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def _side(team: str, score, winner: Optional[str], status: str,
+          picks: int) -> Dict[str, Any]:
     if status == "final" and winner:
         outcome = "won" if winner == team else "lost"
     else:
@@ -99,8 +131,7 @@ def build_scoreboard(
 
     cards.sort(key=lambda c: (
         STATUS_ORDER.get(c["status"], 3),
-        not c["has_picks"],
-        c["kickoff"] or datetime.min.replace(tzinfo=timezone.utc),
+        _as_utc(c["kickoff"]) or datetime.min.replace(tzinfo=timezone.utc),
     ))
     return cards
 
@@ -112,7 +143,7 @@ def _status_chip(card: Dict[str, Any]) -> None:
     elif card["status"] == "final":
         st.badge("FINAL", color="gray")
     elif card["kickoff"]:
-        local = card["kickoff"].replace(tzinfo=timezone.utc).astimezone(PACIFIC)
+        local = _as_utc(card["kickoff"]).astimezone(PACIFIC)
         st.badge(local.strftime("%a %-I:%M %p"), icon="🕐", color="gray")
     else:
         st.badge("TBD", color="gray")
@@ -177,10 +208,14 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
         )
         return
     if not cards:
+        # Reachable only with picks present and none of the picked teams
+        # playing: a bye week, or an abbreviation the sheet and the schedule
+        # disagree on. Sending the reader to check the sheet import would point
+        # them at the one thing that definitely worked.
         st.info(
-            f"**No week {week} picks yet.** The sheet is imported at 07:00 PT "
-            "daily and again at 09:30 PT on Sundays; cards appear for the teams "
-            "people take."
+            f"**No week {week} game features a picked team.** Every entrant is "
+            "on a team that isn't playing this week — usually a bye, or a team "
+            "abbreviation the sheet and the schedule spell differently."
         )
         return
 

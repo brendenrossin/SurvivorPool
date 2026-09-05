@@ -2,8 +2,10 @@
 Weekly Picks Grid
 
 A team x week grid that leads with the current week. Rows are the teams picked
-this week, ordered by this week's count; the current week's cells carry the true
-team colour and earlier weeks recede into a muted version of it.
+this week, ordered by this week's count. The current week's cells carry the team
+colour, lifted where it does not clear the emphasis floor against the surface;
+earlier weeks recede into a muted version of it; and a pick busted this week is
+desaturated and given a danger border.
 
 Replaces the stacked bar chart, which encoded 30 teams as 30 competing colours.
 Because colour here carries identity rather than magnitude, every cell shows its
@@ -330,17 +332,29 @@ def contrast_fill(color: str, background: str, target: float = WCAG_GRAPHIC_MIN)
     if contrast_ratio(color, background) >= target:
         return color
 
+    # Try both directions and take whichever clears with the smaller move,
+    # rather than picking a direction from a luminance threshold. label_ink
+    # used to guess that way and was wrong for five teams; a threshold here
+    # would be the same mistake, and on a mid-luminance surface it picks the
+    # direction with no headroom and returns a colour that misses the target
+    # the function promises.
     hue, sat, lightness = _to_hsl(color)
-    lighten = relative_luminance(background) <= 0.45
+    reached = []
+    for direction in (1, -1):
+        for step in range(1, 101):
+            moved = lightness + direction * step / 100
+            if not 0 <= moved <= 1:
+                break
+            candidate = _from_hsl(hue, sat, moved)
+            if contrast_ratio(candidate, background) >= target:
+                reached.append((step, candidate))
+                break
 
-    for step in range(1, 101):
-        moved = lightness + step / 100 if lighten else lightness - step / 100
-        if not 0 <= moved <= 1:
-            break
-        candidate = _from_hsl(hue, sat, moved)
-        if contrast_ratio(candidate, background) >= target:
-            return candidate
-    return "#ffffff" if lighten else "#000000"
+    if reached:
+        return min(reached)[1]
+    # Neither direction can reach it - the surface is mid-luminance. Give back
+    # whichever endpoint is furthest from it rather than a silent failure.
+    return max(("#ffffff", "#000000"), key=lambda c: contrast_ratio(c, background))
 
 
 DISSOLVE_RATIO = 1.35    # below this a fill and the surface read as one block
@@ -384,7 +398,7 @@ def build_picks_grid(
     team_names: Optional[Dict[str, str]] = None,
     team_status: Optional[Dict[str, str]] = None,
     danger: str = DANGER,
-    current_week_min_contrast: float = 0.0,
+    current_week_min_contrast: Optional[float] = None,
 ) -> go.Figure:
     """Build the picks grid figure.
 
@@ -412,7 +426,7 @@ def build_picks_grid(
             emphasis is bounded by team-colour-to-surface distance, so on a
             dark surface a dark team has nowhere for its history to recede to.
             History is deliberately NOT lifted - that would close the gap this
-            opens. 0 leaves fills at true team colour.
+            opens. None leaves fills at true team colour.
     """
     team_names = team_names or {}
     team_status = team_status or {}
@@ -510,8 +524,6 @@ def build_picks_grid(
             tickmode="array", tickvals=list(range(len(rows))), ticktext=rows,
             showgrid=False, zeroline=False, fixedrange=True, automargin=True,
         ),
-        # Explicit ink - omitting font colour is what made the old tooltip
-        # render near-white on white.
         # Derived from the surface, not hardcoded light: omitting the font
         # colour is what made the old tooltip render near-white on white, and
         # hardcoding it merely moves that bug to the other theme.

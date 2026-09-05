@@ -24,6 +24,14 @@ def main() -> int:
     for err in app.error:
         print("  ERROR:", err.value)
 
+    # A widget that raises inside its own `except` renders st.info and never
+    # reaches app.exception. That is how a NameError which killed all four
+    # Pool Insights tabs passed this script with 0 exceptions: the failure
+    # was wearing an empty state's clothes.
+    broken = [i.value for i in app.info if "unavailable right now" in i.value]
+    for message in broken:
+        print("  BROKEN WIDGET:", message)
+
     # Both grid controls, since each is a full script rerun.
     app.toggle(key="picks_grid_expanded").set_value(True).run()
     app.radio(key="picks_grid_format").set_value("% of week").run()
@@ -31,7 +39,7 @@ def main() -> int:
     for exc in app.exception:
         print("  EXCEPTION:", exc.value)
 
-    return 1 if app.exception else 0
+    return 1 if (app.exception or broken) else 0
 
 
 if __name__ == "__main__":

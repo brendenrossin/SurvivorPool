@@ -7,7 +7,9 @@ ordered by that week's count, padded out with the season's most-picked teams.
 import pytest
 
 from app.picks_grid import (
+    CHROME_PX,
     DANGER,
+    ROW_PX,
     _channels,
     _to_hsl,
     aggregate_picks,
@@ -167,7 +169,7 @@ class TestFigureLayout:
         )
 
     def test_height_scales_with_row_count(self):
-        assert self._figure(["PHI", "ARI"], [1]).layout.height == 2 * 34 + 120
+        assert self._figure(["PHI", "ARI"], [1]).layout.height == 2 * ROW_PX + CHROME_PX
         assert self._figure(["PHI"] * 10, [1]).layout.height == 10 * 34 + 120
 
     def test_axes_claim_room_for_their_labels(self):
@@ -319,6 +321,15 @@ class TestEliminatedCell:
                 fill = eliminated_fill(team, surface)
                 assert contrast_ratio(fill, mute_color(team, surface)) >= 1.45
                 assert contrast_ratio(fill, surface) >= 1.6
+
+    def test_it_is_surface_independent_by_design(self):
+        """The `background` parameter is deliberately not read. The mid target
+        sits far from a light surface and far from a dark one, so no branch is
+        needed. Pinned so the contract is a decision rather than an accident -
+        the parameter is kept for symmetry with mute_color, which a reader
+        compares this against line for line."""
+        for team in TEAM_COLORS:
+            assert eliminated_fill(team, LIGHT_SURFACE) == eliminated_fill(team, DARK_SURFACE)
 
     def test_a_black_team_still_moves(self):
         """LV is already black; its history cell and its busted cell still differ."""
@@ -482,6 +493,26 @@ class TestContrastFill:
             for team in TEAM_COLORS:
                 assert contrast_ratio(contrast_fill(team, surface), surface) >= 3.0
 
+    def test_it_clears_the_floor_on_a_mid_luminance_surface_too(self):
+        """A fixed luminance threshold picks the direction with no headroom on
+        a mid-grey surface and returns a colour that misses the target the
+        function promises. Not reachable with the two shipping surfaces, but
+        the function is public and documented as bidirectional."""
+        chromatic = [t for t in TEAM_COLORS if len(set(_channels(t))) > 1]
+        for surface in ("#B0B0B0", "#A9A9A9", "#9E9E9E", "#808080"):
+            for team in chromatic:
+                lifted = contrast_fill(team, surface, 3.0)
+                assert contrast_ratio(lifted, surface) >= 3.0, f"{team} on {surface}"
+                # Contrast alone is not enough: collapsing to a black or white
+                # endpoint also clears the floor, while throwing away the team
+                # identity the fill exists to carry. Guessing the direction
+                # from a luminance threshold lands exactly there, because the
+                # guessed direction has no headroom and the endpoint fallback
+                # quietly covers for it.
+                assert len(set(_channels(lifted))) > 1, (
+                    f"{team} on {surface} collapsed to an achromatic endpoint"
+                )
+
     def test_hue_is_preserved(self):
         """Lifting must not turn a team into a different team."""
         for team in ("#0B162A", "#203731", "#00338D"):
@@ -524,6 +555,25 @@ class TestLiftedGridKeepsBothMutingAxes:
         fills = [s["fillcolor"] for s in fig.layout.shapes]
         assert contrast_fill("#D50A0A", DARK_SURFACE) not in fills
 
-    def test_zero_leaves_the_grid_at_true_team_colour(self):
-        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=0.0)
+    def test_none_leaves_the_grid_at_true_team_colour(self):
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=None)
         assert "#D50A0A" in [s["fillcolor"] for s in fig.layout.shapes]
+
+    def test_a_dark_team_IS_lifted_in_the_figure(self):
+        """The positive assertion. Without it, replacing the lift with a no-op
+        passes the whole suite: the fixture's TB #D50A0A already clears 3:1 on
+        #0B1220, so it renders identically either way. CHI does not."""
+        dark = {"TB": "#0B162A", "CLE": "#03202F", "SEA": "#0C2340"}
+        fig = _grid(background=DARK_SURFACE, team_colors=dark,
+                    current_week_min_contrast=3.0)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert contrast_fill("#0B162A", DARK_SURFACE, 3.0) in fills
+        assert "#0B162A" not in fills, "current week rendered at unlifted colour"
+
+    def test_the_lifted_fill_clears_the_floor_it_was_given(self):
+        dark = {"TB": "#0B162A", "CLE": "#03202F", "SEA": "#0C2340"}
+        fig = _grid(background=DARK_SURFACE, team_colors=dark,
+                    current_week_min_contrast=3.0, weeks=[14],
+                    counts={(14, "TB"): 16, (14, "CLE"): 2, (14, "SEA"): 1})
+        for shape in fig.layout.shapes:
+            assert contrast_ratio(shape["fillcolor"], DARK_SURFACE) >= 3.0
