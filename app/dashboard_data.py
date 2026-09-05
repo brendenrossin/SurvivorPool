@@ -5,7 +5,12 @@ Data fetching functions for Streamlit dashboard
 import os
 import json
 import streamlit as st
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
+    from typing import TypedDict
+except ImportError:  # pragma: no cover
+    TypedDict = None
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, text, select
 from datetime import datetime
@@ -405,3 +410,144 @@ def search_players(query: str, season: int) -> List[str]:
 
     finally:
         db.close()
+
+def decide_week_results(
+    games: Iterable[Tuple[str, str, str, Optional[int], Optional[int]]],
+) -> Dict[str, str]:
+    """{team: 'won' | 'lost' | 'pending'} for one week's games.
+
+    Rows are (status, home_team, away_team, home_score, away_score).
+
+    A TIE IS A LOSS FOR BOTH TEAMS. Survivor pools pay out on a win, so a tie
+    eliminates everyone who picked either side. Anything that is not a final
+    game with both scores present is 'pending' - including a live game, where a
+    team leading at half has survived nothing yet, and a game marked final
+    before ingestion has filled the score in.
+
+    This rule used to live inline in a Streamlit render function, where no test
+    could reach it: deleting it passed the entire suite.
+    """
+    status: Dict[str, str] = {}
+    for game_status, home, away, home_score, away_score in games:
+        decided = (
+            game_status == "final"
+            and home_score is not None
+            and away_score is not None
+        )
+        if not decided:
+            status.setdefault(home, "pending")
+            status.setdefault(away, "pending")
+        elif home_score == away_score:
+            status[home] = status[away] = "lost"
+        elif home_score > away_score:
+            status[home], status[away] = "won", "lost"
+        else:
+            status[away], status[home] = "won", "lost"
+    return status
+
+
+@st.cache_data(ttl=60)
+def get_week_team_status(season: int, week: int) -> Dict[str, str]:
+    """Cached {team: 'won' | 'lost' | 'pending'} for one week.
+
+    Replaces an uncached whole-ORM-row Game query that ran inline in the render
+    path on every script rerun - which the grid's two controls now trigger on
+    every toggle.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        rows = db.query(
+            Game.status, Game.home_team, Game.away_team,
+            Game.home_score, Game.away_score,
+        ).filter(Game.season == season, Game.week == week).all()
+        return decide_week_results(rows)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=60)
+def get_week_game_statuses(season: int) -> Dict[int, List[str]]:
+    """{week: [game status, ...]} for a whole season."""
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        rows = db.query(Game.week, Game.status).filter(Game.season == season).all()
+        by_week: Dict[int, List[str]] = {}
+        for week, status in rows:
+            by_week.setdefault(week, []).append(status)
+        return by_week
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+class Scoreboard(TypedDict):
+    """One week's scoreboard payload.
+
+    `games` rows carry the ten Game columns build_scoreboard reads;
+    `pick_counts` is {team: picks}; `results` is {game_id: {"survived": n,
+    "eliminated": n}}.
+    """
+
+    games: List[Dict[str, Any]]
+    pick_counts: Dict[str, int]
+    results: Dict[str, Dict[str, int]]
+
+
+@st.cache_data(ttl=60)
+def get_week_scoreboard(season: int, week: int) -> Scoreboard:
+    """Games, pick counts and survival splits for one week, as plain dicts.
+
+    Returns plain data rather than ORM rows so the view layer stays free of the
+    session, and so the whole payload is cacheable.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        # Columns, not whole ORM rows: every one of these is projected straight
+        # into a dict on the next line, so hydrating Game instances and an
+        # identity map buys nothing. No order_by either - build_scoreboard
+        # sorts unconditionally.
+        games = [{
+            "game_id": game_id, "status": status,
+            "home_team": home_team, "away_team": away_team,
+            "home_score": home_score, "away_score": away_score,
+            "winner_abbr": winner_abbr, "kickoff": kickoff,
+            "favorite_team": favorite_team, "point_spread": point_spread,
+        } for (game_id, status, home_team, away_team, home_score, away_score,
+               winner_abbr, kickoff, favorite_team, point_spread) in db.query(
+            Game.game_id, Game.status, Game.home_team, Game.away_team,
+            Game.home_score, Game.away_score, Game.winner_abbr, Game.kickoff,
+            Game.favorite_team, Game.point_spread,
+        ).filter(Game.season == season, Game.week == week).all()]
+
+        counts = dict(db.query(Pick.team_abbr, func.count()).filter(
+            Pick.season == season, Pick.week == week,
+            Pick.team_abbr.isnot(None),
+        ).group_by(Pick.team_abbr).all())
+
+        results: Dict[str, Dict[str, int]] = {}
+        rows = db.query(PickResult.game_id, PickResult.survived, func.count()).join(
+            Pick, Pick.pick_id == PickResult.pick_id
+        ).filter(Pick.season == season, Pick.week == week).group_by(
+            PickResult.game_id, PickResult.survived
+        ).all()
+        for game_id, survived, count in rows:
+            split = results.setdefault(game_id, {"survived": 0, "eliminated": 0})
+            if survived is True:
+                split["survived"] += count
+            elif survived is False:
+                split["eliminated"] += count
+
+        return {"games": games, "pick_counts": counts, "results": results}
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass

@@ -7,13 +7,32 @@ ordered by that week's count, padded out with the season's most-picked teams.
 import pytest
 
 from app.picks_grid import (
+    CHROME_PX,
+    DANGER,
+    ROW_PX,
+    _channels,
+    _to_hsl,
     aggregate_picks,
     build_picks_grid,
+    cell_edge,
+    contrast_fill,
+    contrast_ratio,
+    eliminated_edge,
+    eliminated_fill,
+    ensure_contrast,
+    history_ink,
     label_ink,
     mute_color,
+    relative_luminance,
     resolve_current_week,
     select_grid_rows,
 )
+
+LIGHT_SURFACE = "#F8FAFC"
+DARK_SURFACE = "#0B1220"
+# Spans the real range in db/seed_team_map.json: LV black to PIT gold.
+TEAM_COLORS = ["#D50A0A", "#311D00", "#002244", "#FB4F14", "#000000", "#FFB612",
+               "#203731", "#00338D", "#0B162A", "#003594", "#D3BC8D", "#69BE28"]
 
 SEASON_TOTALS = {"DEN": 132, "GB": 116, "BUF": 113, "ARI": 110, "BAL": 99,
                  "LAR": 98, "DET": 98, "SEA": 74, "KC": 40, "TB": 30,
@@ -87,10 +106,14 @@ def test_expanded_keeps_the_current_week_on_top():
     ("#D3BC8D", True),   # NO  vegas gold - luminance .52
     ("#000000", False),  # LV  black
     ("#0B162A", False),  # CHI navy
-    ("#FB4F14", False),  # DEN orange     - luminance .26
+    # DEN/CIN orange, luminance .26. This case asserted False, because it was
+    # written against the 0.45 threshold rather than against contrast: white
+    # ink gives 3.37:1 here and dark ink gives 5.84:1, so white was the wrong
+    # answer and the test was encoding the bug. The crossover is 0.1791.
+    ("#FB4F14", True),
 ])
 def test_label_ink_contrasts_with_the_fill(hex_color, expected_dark):
-    """Ink is computed from luminance, never assumed."""
+    """Ink is computed from contrast, never assumed."""
     assert (label_ink(hex_color) == "#0b0b0b") is expected_dark
 
 
@@ -146,7 +169,7 @@ class TestFigureLayout:
         )
 
     def test_height_scales_with_row_count(self):
-        assert self._figure(["PHI", "ARI"], [1]).layout.height == 2 * 34 + 120
+        assert self._figure(["PHI", "ARI"], [1]).layout.height == 2 * ROW_PX + CHROME_PX
         assert self._figure(["PHI"] * 10, [1]).layout.height == 10 * 34 + 120
 
     def test_axes_claim_room_for_their_labels(self):
@@ -246,3 +269,311 @@ class TestResolveCurrentWeekWithGaps:
         for started in ([1], [1, 2], [1, 2, 3], range(1, 19)):
             week = resolve_current_week(pick_weeks=[1, 3, 5], started_game_weeks=started)
             assert week in (1, 3, 5)
+
+
+class TestEliminatedCell:
+    """The busted current-week fill must never be readable as history.
+
+    The grid already mutes toward the surface to mean "an earlier week". If
+    elimination muted the same way the grid would lose its primary encoding, so
+    elimination drains SATURATION while history drains LIGHTNESS.
+    """
+
+    def test_the_fill_is_achromatic(self):
+        """Hue is the channel elimination gives up."""
+        for team in TEAM_COLORS:
+            fill = eliminated_fill(team, LIGHT_SURFACE)
+            r, g, b = int(fill[1:3], 16), int(fill[3:5], 16), int(fill[5:7], 16)
+            assert r == g == b, f"{team} -> {fill} kept a hue"
+
+    def test_it_separates_from_history_in_lightness_too(self):
+        """An earlier version took history's exact luminance. That stated the
+        axes argument purely but left the fill sitting in the same pale band as
+        history on a light surface, with the border carrying the whole signal.
+        The approved design converges toward the middle instead."""
+        for team in TEAM_COLORS:
+            history = mute_color(team, LIGHT_SURFACE)
+            fill = eliminated_fill(team, LIGHT_SURFACE)
+            assert contrast_ratio(fill, history) >= 1.45, f"{team} busted cell too close to history"
+
+    def test_every_busted_cell_lands_in_the_same_narrow_band(self):
+        """Elimination is a shared fate; identity lives in the row label."""
+        lums = [relative_luminance(eliminated_fill(t, LIGHT_SURFACE)) for t in TEAM_COLORS]
+        assert max(lums) - min(lums) < 0.30
+
+    def test_it_never_equals_the_muted_history_colour(self):
+        """The collision this whole design exists to prevent."""
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert eliminated_fill(team, surface) != mute_color(team, surface)
+
+    def test_it_never_equals_the_current_week_colour(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert eliminated_fill(team, surface).lower() != team.lower()
+
+    def test_it_separates_from_history_on_either_surface(self):
+        """The mid target needs no surface branch: it sits far from a light
+        surface and far from a dark one, so a light/dark reversal changes
+        nothing here. This is the property that has to survive, not sameness."""
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = eliminated_fill(team, surface)
+                assert contrast_ratio(fill, mute_color(team, surface)) >= 1.45
+                assert contrast_ratio(fill, surface) >= 1.6
+
+    def test_it_is_surface_independent_by_design(self):
+        """The `background` parameter is deliberately not read. The mid target
+        sits far from a light surface and far from a dark one, so no branch is
+        needed. Pinned so the contract is a decision rather than an accident -
+        the parameter is kept for symmetry with mute_color, which a reader
+        compares this against line for line."""
+        for team in TEAM_COLORS:
+            assert eliminated_fill(team, LIGHT_SURFACE) == eliminated_fill(team, DARK_SURFACE)
+
+    def test_a_black_team_still_moves(self):
+        """LV is already black; its history cell and its busted cell still differ."""
+        assert eliminated_fill("#000000", LIGHT_SURFACE) != mute_color("#000000", LIGHT_SURFACE)
+
+
+class TestEliminatedEdge:
+    """The red border is the primary signal, so its contrast is computed."""
+
+    def test_the_edge_clears_three_to_one_on_every_team_and_surface(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = eliminated_fill(team, surface)
+                assert contrast_ratio(eliminated_edge(fill, DANGER), fill) >= 3.0
+
+    def test_the_token_passes_through_untouched_when_it_already_clears(self):
+        """ensure_contrast is a no-op when the token already works."""
+        assert ensure_contrast("#B91C1C", "#FFFFFF") == "#B91C1C"
+
+    def test_contrast_ratio_is_symmetric_and_bounded(self):
+        assert contrast_ratio("#000000", "#FFFFFF") == contrast_ratio("#FFFFFF", "#000000")
+        assert round(contrast_ratio("#000000", "#FFFFFF"), 1) == 21.0
+        assert contrast_ratio("#777777", "#777777") == 1.0
+
+
+class TestLabelInkPicksTheBetterInk:
+    """label_ink thresholded luminance at 0.45. The real crossover is 0.1791,
+    so every fill between them got white ink where black reads better - five
+    teams under the 4.5:1 small-text floor on the shipping light build."""
+
+    def test_the_failing_teams_now_clear_the_small_text_floor(self):
+        # CIN/DEN, MIA, CAR, LAC
+        for team in ("#FB4F14", "#008E97", "#0085CA", "#0080C6"):
+            assert contrast_ratio(label_ink(team), team) >= 4.5
+
+    def test_it_always_picks_the_higher_contrast_ink(self):
+        for team in TEAM_COLORS + ["#FB4F14", "#008E97", "#0085CA", "#0080C6"]:
+            chosen = contrast_ratio(label_ink(team), team)
+            best = max(contrast_ratio(ink, team) for ink in ("#0b0b0b", "#ffffff"))
+            assert chosen == best, f"{team} took the worse ink"
+
+    def test_the_extremes_are_unchanged(self):
+        """LV black and PIT gold were already right; don't regress them."""
+        assert label_ink("#000000") == "#ffffff"
+        assert label_ink("#FFB612") == "#0b0b0b"
+
+
+class TestSurfaceDerivedInk:
+    """Three colours were hardcoded for a light surface. They invert on a dark
+    one - a dark fill is the one that dissolves there, not a light one."""
+
+    def test_a_cell_that_would_dissolve_gets_a_hairline(self):
+        """A near-white fill on a near-white surface needs an edge."""
+        assert cell_edge("#FEFEFE", LIGHT_SURFACE) != "#FEFEFE"
+
+    def test_the_same_rule_catches_a_dark_fill_on_a_dark_surface(self):
+        """The case the old > 0.6 threshold could not see."""
+        assert cell_edge("#0B162A", DARK_SURFACE) != "#0B162A"
+
+    def test_a_cell_with_its_own_contrast_keeps_its_own_edge(self):
+        assert cell_edge("#D50A0A", LIGHT_SURFACE) == "#D50A0A"
+
+    def test_history_ink_is_legible_on_its_own_fill(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = mute_color(team, surface)
+                assert contrast_ratio(history_ink(fill), fill) >= 3.0
+
+    def test_history_ink_recedes_rather_than_shouting(self):
+        """Deliberately softer than full contrast - history should recede."""
+        fill = mute_color("#D50A0A", LIGHT_SURFACE)
+        assert contrast_ratio(history_ink(fill), fill) < contrast_ratio(label_ink(fill), fill)
+
+
+WK14_COUNTS = {(13, "TB"): 4, (14, "TB"): 16, (14, "CLE"): 2, (14, "SEA"): 1}
+WK14_TOTALS = {13: 4, 14: 19}
+WK14_COLORS = {"TB": "#D50A0A", "CLE": "#311D00", "SEA": "#002244"}
+WK14_STATUS = {"TB": "lost", "CLE": "lost", "SEA": "won"}
+
+
+def _grid(**kwargs):
+    params = dict(
+        weeks=[13, 14], rows=["TB", "CLE", "SEA"], counts=WK14_COUNTS,
+        week_totals=WK14_TOTALS, team_colors=WK14_COLORS, current_week=14,
+        background=LIGHT_SURFACE,
+    )
+    params.update(kwargs)
+    return build_picks_grid(**params)
+
+
+class TestEliminatedInFigure:
+    """2025 week 14: 16 entrants on Tampa Bay, TB lost, the pool ended at one."""
+
+    def test_omitting_team_status_changes_nothing(self):
+        """Every existing caller and test must render exactly as before."""
+        assert _grid().layout.shapes == _grid(team_status=None).layout.shapes
+
+    def test_a_lost_current_week_cell_takes_the_eliminated_fill(self):
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert eliminated_fill("#D50A0A", LIGHT_SURFACE) in fills
+
+    def test_a_won_current_week_cell_keeps_true_team_colour(self):
+        """Won and not-yet-kicked-off are deliberately identical."""
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert "#002244" in fills
+
+    def test_an_eliminated_teams_earlier_weeks_are_untouched(self):
+        """History's job is volume, not outcome."""
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert mute_color("#D50A0A", LIGHT_SURFACE) in fills
+
+    def test_a_lost_cell_takes_the_danger_border(self):
+        shapes = _grid(team_status=WK14_STATUS).layout.shapes
+        fill = eliminated_fill("#D50A0A", LIGHT_SURFACE)
+        lost = [s for s in shapes if s["fillcolor"] == fill]
+        assert lost and lost[0]["line"]["width"] == 2
+        assert lost[0]["line"]["color"] == eliminated_edge(fill)
+
+    def test_a_pending_team_is_not_treated_as_lost(self):
+        status = {"TB": "pending", "CLE": "pending", "SEA": "pending"}
+        fills = [s["fillcolor"] for s in _grid(team_status=status).layout.shapes]
+        assert eliminated_fill("#D50A0A", LIGHT_SURFACE) not in fills
+
+    def test_a_status_for_a_team_not_in_the_grid_is_ignored(self):
+        _grid(team_status={"KC": "lost"})  # must not raise
+
+    def test_the_tooltip_names_the_elimination(self):
+        trace = _grid(team_status=WK14_STATUS).data[0]
+        assert any("Eliminated" in text for text in trace.hovertext)
+
+
+class TestContrastFill:
+    """The current week's emphasis, lifted so the grid keeps leading with it.
+
+    The grid's emphasis channel is bounded by team-colour-to-surface distance,
+    so on #0B1220 a dark team has nowhere for its history to recede to: CIE76
+    dE between CHI's current and muted cells falls to 3.5, about the
+    just-noticeable threshold.
+    """
+
+    def test_a_team_that_already_clears_is_untouched(self):
+        """Moves only as far as the floor requires."""
+        assert contrast_fill("#FB4F14", DARK_SURFACE) == "#FB4F14"
+
+    def test_dark_teams_are_lifted_on_a_dark_surface(self):
+        for team in ("#0B162A", "#03202F", "#0C2340", "#203731"):
+            lifted = contrast_fill(team, DARK_SURFACE)
+            assert lifted != team
+            assert contrast_ratio(lifted, DARK_SURFACE) >= 3.0
+
+    def test_light_teams_are_darkened_on_a_light_surface(self):
+        """Bidirectional. PIT gold and NO vegas gold fail on light and must
+        come down; a lift-only version would run PIT to white."""
+        for team in ("#FFB612", "#D3BC8D"):
+            darkened = contrast_fill(team, LIGHT_SURFACE)
+            assert relative_luminance(darkened) < relative_luminance(team)
+            assert contrast_ratio(darkened, LIGHT_SURFACE) >= 3.0
+
+    def test_every_team_clears_the_floor_on_both_surfaces(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert contrast_ratio(contrast_fill(team, surface), surface) >= 3.0
+
+    def test_it_clears_the_floor_on_a_mid_luminance_surface_too(self):
+        """A fixed luminance threshold picks the direction with no headroom on
+        a mid-grey surface and returns a colour that misses the target the
+        function promises. Not reachable with the two shipping surfaces, but
+        the function is public and documented as bidirectional."""
+        chromatic = [t for t in TEAM_COLORS if len(set(_channels(t))) > 1]
+        for surface in ("#B0B0B0", "#A9A9A9", "#9E9E9E", "#808080"):
+            for team in chromatic:
+                lifted = contrast_fill(team, surface, 3.0)
+                assert contrast_ratio(lifted, surface) >= 3.0, f"{team} on {surface}"
+                # Contrast alone is not enough: collapsing to a black or white
+                # endpoint also clears the floor, while throwing away the team
+                # identity the fill exists to carry. Guessing the direction
+                # from a luminance threshold lands exactly there, because the
+                # guessed direction has no headroom and the endpoint fallback
+                # quietly covers for it.
+                assert len(set(_channels(lifted))) > 1, (
+                    f"{team} on {surface} collapsed to an achromatic endpoint"
+                )
+
+    def test_hue_is_preserved(self):
+        """Lifting must not turn a team into a different team."""
+        for team in ("#0B162A", "#203731", "#00338D"):
+            assert abs(_to_hsl(contrast_fill(team, DARK_SURFACE))[0] - _to_hsl(team)[0]) < 0.02
+
+    def test_a_black_team_lifts_to_grey(self):
+        """LV #000000 has no hue to keep. Black cannot be shown on black; this
+        is the accepted cost, not a bug to special-case back."""
+        lifted = contrast_fill("#000000", DARK_SURFACE)
+        r, g, b = _channels(lifted)
+        assert r == g == b and r > 0
+
+    def test_it_restores_the_emphasis_the_dark_surface_took_away(self):
+        """The measurement that motivated it: CHI's current-vs-muted gap."""
+        for team in ("#0B162A", "#03202F", "#000000", "#0C2340"):
+            muted = mute_color(team, DARK_SURFACE)
+            assert contrast_ratio(team, muted) < 1.6, "true colour barely separates"
+            assert contrast_ratio(contrast_fill(team, DARK_SURFACE), muted) >= 2.5
+
+
+class TestLiftedGridKeepsBothMutingAxes:
+    """Lifting touches the current week only, so neither mute is disturbed."""
+
+    def test_history_is_never_lifted(self):
+        """Lifting history would close the gap the lift exists to open."""
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert mute_color("#D50A0A", DARK_SURFACE) in fills
+
+    def test_elimination_still_mutes_on_saturation(self):
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0,
+                    team_status=WK14_STATUS)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert eliminated_fill("#D50A0A", DARK_SURFACE) in fills
+
+    def test_an_eliminated_cell_is_not_lifted(self):
+        """Elimination replaces the fill outright; it does not get emphasised."""
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0,
+                    team_status=WK14_STATUS)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert contrast_fill("#D50A0A", DARK_SURFACE) not in fills
+
+    def test_none_leaves_the_grid_at_true_team_colour(self):
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=None)
+        assert "#D50A0A" in [s["fillcolor"] for s in fig.layout.shapes]
+
+    def test_a_dark_team_IS_lifted_in_the_figure(self):
+        """The positive assertion. Without it, replacing the lift with a no-op
+        passes the whole suite: the fixture's TB #D50A0A already clears 3:1 on
+        #0B1220, so it renders identically either way. CHI does not."""
+        dark = {"TB": "#0B162A", "CLE": "#03202F", "SEA": "#0C2340"}
+        fig = _grid(background=DARK_SURFACE, team_colors=dark,
+                    current_week_min_contrast=3.0)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert contrast_fill("#0B162A", DARK_SURFACE, 3.0) in fills
+        assert "#0B162A" not in fills, "current week rendered at unlifted colour"
+
+    def test_the_lifted_fill_clears_the_floor_it_was_given(self):
+        dark = {"TB": "#0B162A", "CLE": "#03202F", "SEA": "#0C2340"}
+        fig = _grid(background=DARK_SURFACE, team_colors=dark,
+                    current_week_min_contrast=3.0, weeks=[14],
+                    counts={(14, "TB"): 16, (14, "CLE"): 2, (14, "SEA"): 1})
+        for shape in fig.layout.shapes:
+            assert contrast_ratio(shape["fillcolor"], DARK_SURFACE) >= 3.0

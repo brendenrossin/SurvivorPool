@@ -32,7 +32,8 @@ A **team × week grid** that leads with the current week.
 - **Row order** is this week's pick count descending, then season total descending,
   then alphabetical. Rows beyond the current week's teams are filled by season total.
 - **Columns** are weeks `1..current_week`. Future weeks are not shown.
-- **The current week's cells** carry the true team colour.
+- **The current week's cells** carry the team colour, lifted where it does not
+  clear 3:1 against the surface (see *Amendment: the emphasis lift* below).
 - **Earlier weeks** carry a muted version of the team colour — blended 26% toward
   the surface — so history recedes but stays traceable by hue.
 - **Every cell shows its number.** Because colour carries identity here rather than
@@ -40,6 +41,52 @@ A **team × week grid** that leads with the current week.
   a toggle for share of that week's survivors.
 - **An expand toggle** drops the row limit and shows every team picked so far
   (up to 32 rows).
+
+### Amendment 2026-09-04: the emphasis lift
+
+**This spec's first rule changed.** It said the current week carries the *true*
+team colour; it now carries the team colour **lifted to clear WCAG 3:1 against
+the surface**, via `contrast_fill()` in `app/picks_grid.py`. Owner-approved off a
+rendered three-way comparison of the real 2025 week 6 grid, not off numbers.
+
+**Why the original rule could not survive a dark surface.** The grid's emphasis
+is the gap between the current week's fill and `mute_color()`, and that gap is
+bounded by the distance from a team's colour to the surface. A dark team on
+`#0B1220` has nowhere to recede to. CIE76 ΔE between a team's true and muted
+colour:
+
+| | light `#F8FAFC` | dark `#0B1220` |
+|---|---|---|
+| mean | 63.7 | 37.7 |
+| teams under ΔE 10 | 0 | **4** |
+| CHI `#0B162A` | 70.8 | **3.5** |
+| HOU, LV, TEN | 67.2, 75.1, 66.6 | 6.1, 7.8, 9.7 |
+
+ΔE 3.5 is around the just-noticeable threshold. For those teams the grid stopped
+leading with the current week, which is its whole purpose. Against 2025's real
+picks that is 23.8% of all picks at risk, including **GB — the second
+most-picked team of the season, 116 picks — at ΔE 16.3 against light's 59.3.**
+
+**Lifting the emphasised end is the only direction with headroom.** Raising
+`HISTORY_MIX` moves muted *toward* true; lowering it pins muted to the surface.
+Muting history toward `SURFACE_RAISED` was measured and is worse still (min ΔE
+3.1, five teams under 10).
+
+`contrast_fill` is **bidirectional** and hue-preserving, so it also *darkens*
+PIT `#FFB612` and NO `#D3BC8D`, which fail against the light surface. A
+lift-only version runs PIT to white.
+
+**Accepted cost:** LV `#000000` has no hue to keep and lifts to a grey. Black
+cannot be shown on black. Four picks in the whole 2025 season; reviewed
+specifically before the ruling, and deliberately not special-cased back.
+
+**History is not lifted**, and elimination is unaffected — it mutes on
+saturation. Both are pinned by `TestLiftedGridKeepsBothMutingAxes`.
+
+### Amendment 2026-09-04: the breakdown table is gone
+
+The "Week N Picks Breakdown" table below the grid is deleted; the grid carries
+win/loss itself. See `docs/design/scores-and-grid-spec.md`.
 
 ### Decisions, and why
 
@@ -50,6 +97,7 @@ A **team × week grid** that leads with the current week.
 | Future weeks | **Hidden** | The sheet holds picks for unplayed weeks from day one. Showing them would leak next week's picks. |
 | Row cap | **None** | Realistically ≤16 teams in a week, usually far fewer. |
 | Colour job | Identity, not magnitude | Follows from using team colours; forces the number into every cell. |
+| Busted current-week pick | Desaturated fill, danger border | Mutes on *saturation*, so it cannot be read as history, which mutes on lightness. See `docs/design/scores-and-grid-spec.md`. |
 
 ### The team-colour tradeoff, measured
 

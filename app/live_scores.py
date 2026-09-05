@@ -1,316 +1,240 @@
 #!/usr/bin/env python3
-"""
-Live Scores Widget - Shows current week's games
-- When picks exist: shows games for picked teams only
-- When no picks exist: shows ALL games to make dashboard engaging
+"""Live scores — the week's games as a grid of cards.
+
+What separates this from any scoreboard is the second line of every card: how
+many entrants are riding on each team, and what just happened to them. That is
+the reason anyone opens this page instead of ESPN's.
+
+Data comes from the database only. API calls happen in the cron jobs.
 """
 
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional
+
+import pytz
 import streamlit as st
-import pandas as pd
-from datetime import datetime
-from typing import List, Dict, Any
-import os
+
+from app.dashboard_data import get_week_scoreboard
 from app.odds_helpers import format_pregame_line
 
-def get_survivor_counts(db, game) -> Dict[str, int]:
-    """Calculate survivor counts for a final game"""
-    from api.models import Pick, PickResult, Player
+PACIFIC = pytz.timezone("America/Los_Angeles")
 
-    if game.status != 'final':
-        return {'survived': 0, 'eliminated': 0}
+# Live first, then upcoming, then settled; within a status, by kickoff.
+#
+# There is deliberately no "picked games first" tiebreak: has_picks is uniform
+# across every card in each reachable state. When picks are revealed and any
+# exist, the filter has already dropped the games nobody picked; otherwise no
+# card carries picks at all. A tiebreak on it could never discriminate.
+STATUS_ORDER = {"in": 0, "pre": 1, "final": 2}
 
-    try:
-        # Get picks and their results for this game
-        picks_query = db.query(Pick, PickResult.survived).join(
-            PickResult, Pick.pick_id == PickResult.pick_id
-        ).filter(
-            Pick.season == game.season,
-            Pick.week == game.week,
-            (Pick.team_abbr == game.home_team) | (Pick.team_abbr == game.away_team)
-        )
 
-        picks_results = picks_query.all()
+def resolve_scoreboard_week(
+    current_week: int, week_statuses: Dict[int, List[str]]
+) -> int:
+    """The week the scoreboard should show.
 
-        survived_count = sum(1 for pick, survived in picks_results if survived == True)
-        eliminated_count = sum(1 for pick, survived in picks_results if survived == False)
+    Deliberately NOT the grid's `resolve_current_week`. The grid leads with the
+    last week that kicked off, because that is the last week whose picks may be
+    published. The scoreboard rolls forward once a week is finished, so Tuesday
+    shows the upcoming slate rather than a settled one.
 
-        return {'survived': survived_count, 'eliminated': eliminated_count}
+    The roll is driven by whether the games actually finished. The rule this
+    replaces added a week every Tuesday after 04:00 UTC whether or not anything
+    had been played, on top of a base week derived as max(Game.week) - which in
+    2025 is week 16, a week nobody played, because the NFL schedule outruns the
+    pool.
+    """
+    statuses = week_statuses.get(current_week)
+    if not statuses or not all(status == "final" for status in statuses):
+        return current_week
+    return current_week + 1 if (current_week + 1) in week_statuses else current_week
 
-    except Exception as e:
-        print(f"Error calculating survivor counts: {e}")
-        return {'survived': 0, 'eliminated': 0}
 
-def create_game_display(game, home_pickers: List[str], away_pickers: List[str], db=None) -> Dict[str, Any]:
-    """Create display data for a single game"""
-    from datetime import timezone
-    import pytz
+def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> bool:
+    """Whether the scoreboard may show pick data for `scoreboard_week`.
 
-    # Determine game status display
-    if game.status == 'pre':
-        # Convert kickoff time to Pacific (handles PST/PDT automatically)
-        pacific = pytz.timezone('America/Los_Angeles')
-        if game.kickoff:
-            kickoff_pacific = game.kickoff.replace(tzinfo=timezone.utc).astimezone(pacific)
-            status_display = f"🕐 {kickoff_pacific.strftime('%m/%d %I:%M %p')}"
-        else:
-            status_display = "🕐 TBD"
+    A week reveals its picks if and only if one of its OWN games has left
+    'pre'. Stated that way the invariant is local and unconditional, which is
+    the point: the first version derived it by comparing the scoreboard's week
+    against the grid's, and that ordering is satisfied in exactly the case it
+    most needed to exclude. Before any game of the season has started,
+    resolve_current_week falls back to the first week holding picks rather than
+    reporting "nothing has started", so both weeks were 1 and 1 <= 1 published
+    the entire field's week 1 picks days before kickoff.
+    """
+    return scoreboard_week in set(started_weeks)
 
-        # Show spread if available, otherwise "vs"
-        score_display = format_pregame_line(
-            game.home_team,
-            game.away_team,
-            game.favorite_team,
-            game.point_spread
-        )
-    elif game.status == 'in':
-        status_display = "🔴 LIVE"
-        score_display = f"{game.home_score} - {game.away_score}"
-    elif game.status == 'final':
-        status_display = "✅ FINAL"
-        score_display = f"{game.home_score} - {game.away_score}"
-        # Add winner indicator
-        if game.winner_abbr == game.home_team:
-            status_display += f" ({game.home_team} WINS)"
-        elif game.winner_abbr == game.away_team:
-            status_display += f" ({game.away_team} WINS)"
+
+def _as_utc(moment: Optional[datetime]) -> Optional[datetime]:
+    """Attach UTC to a naive timestamp; convert - never overwrite - an aware one.
+
+    Postgres returns aware datetimes for Game.kickoff, SQLite (the local dev
+    path) returns naive ones. `.replace(tzinfo=utc)` is right for the second
+    and silently wrong for the first the moment the session TimeZone is not UTC.
+    """
+    if moment is None:
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def _side(team: str, score, winner: Optional[str], status: str,
+          picks: int) -> Dict[str, Any]:
+    if status == "final" and winner:
+        outcome = "won" if winner == team else "lost"
     else:
-        status_display = game.status.upper()
-        score_display = f"{game.home_score or 0} - {game.away_score or 0}"
+        outcome = None
+    return {"team": team, "score": score, "picks": picks, "outcome": outcome}
 
-    # Get survivor counts for final games
-    survivor_counts = {'survived': 0, 'eliminated': 0}
-    if game.status == 'final' and db and (home_pickers or away_pickers):
-        survivor_counts = get_survivor_counts(db, game)
 
-    return {
-        'game_id': game.game_id,
-        'away_team': game.away_team,
-        'home_team': game.home_team,
-        'away_score': game.away_score or 0,
-        'home_score': game.home_score or 0,
-        'status': game.status,
-        'status_display': status_display,
-        'score_display': score_display,
-        'kickoff': game.kickoff,
-        'away_pickers': away_pickers,
-        'home_pickers': home_pickers,
-        'has_pickers': len(home_pickers) > 0 or len(away_pickers) > 0,
-        'survivor_counts': survivor_counts
-    }
+def build_scoreboard(
+    games: List[Dict[str, Any]],
+    pick_counts: Dict[str, int],
+    results: Dict[str, Dict[str, int]],
+    reveal_picks: bool,
+) -> List[Dict[str, Any]]:
+    """Card view models for one week.
 
-def get_live_scores_data(db, current_season: int, current_week: int) -> List[Dict[str, Any]]:
+    `reveal_picks` is false for a week that has not kicked off. It suppresses
+    the counts AND the filtering, because filtering the slate down to picked
+    teams is itself a disclosure of the field's picks — by omission rather than
+    by a number, but the same leak, days before kickoff. So an unplayed week
+    shows every game with no pick data at all, and snaps to picked-teams-only
+    with counts the moment the week starts.
     """
-    Get live scores for teams that players have picked this week
-    If no picks exist, show ALL games to make dashboard more engaging
-    DATA ONLY FROM DATABASE - NO API CALLS!
-    (API calls happen via cron jobs only)
-    """
-    from api.models import Pick, Game, Player
+    cards = []
+    for game in games:
+        home, away = game["home_team"], game["away_team"]
+        home_picks = pick_counts.get(home, 0) if reveal_picks else 0
+        away_picks = pick_counts.get(away, 0) if reveal_picks else 0
 
-    try:
-        # Get all picks for current week
-        picks_query = db.query(Pick, Player.display_name).join(
-            Player, Pick.player_id == Player.player_id
-        ).filter(
-            Pick.season == current_season,
-            Pick.week == current_week,
-            Pick.team_abbr.is_not(None)
-        )
+        # Nobody has picked at all: show the whole slate rather than nothing.
+        if reveal_picks and pick_counts and not (home_picks or away_picks):
+            continue
 
-        picks = picks_query.all()
+        split = results.get(game["game_id"], {}) if reveal_picks else {}
+        has_line = game["favorite_team"] and game["point_spread"]
+        cards.append({
+            "game_id": game["game_id"],
+            "status": game["status"],
+            "kickoff": game["kickoff"],
+            "line": format_pregame_line(
+                home, away, game["favorite_team"], game["point_spread"]
+            ) if has_line else None,
+            "away": _side(away, game["away_score"], game["winner_abbr"],
+                          game["status"], away_picks),
+            "home": _side(home, game["home_score"], game["winner_abbr"],
+                          game["status"], home_picks),
+            "has_picks": bool(home_picks or away_picks),
+            "eliminated": split.get("eliminated", 0),
+            "survived": split.get("survived", 0),
+        })
 
-        if not picks:
-            # No picks yet - show ALL games for this week to make dashboard engaging
-            games_query = db.query(Game).filter(
-                Game.season == current_season,
-                Game.week == current_week
-            ).order_by(Game.kickoff)
+    # game_id last so the order is total. Most of a Sunday slate shares one
+    # kickoff, and without it those ties fall back to whatever order the
+    # database returned - so cards could shuffle between reruns.
+    cards.sort(key=lambda c: (
+        STATUS_ORDER.get(c["status"], 3),
+        _as_utc(c["kickoff"]) or datetime.min.replace(tzinfo=timezone.utc),
+        c["game_id"],
+    ))
+    return cards
 
-            games = games_query.all()
 
-            # Build live scores with no pickers (show all games)
-            live_scores = []
-            for game in games:
-                live_scores.append(create_game_display(game, [], [], db))
+def _status_chip(card: Dict[str, Any]) -> None:
+    """Status as a badge. st.badge's colours are theme tokens, not literals."""
+    if card["status"] == "in":
+        st.badge("LIVE", icon="🔴", color="red")
+    elif card["status"] == "final":
+        st.badge("FINAL", color="gray")
+    elif card["kickoff"]:
+        local = _as_utc(card["kickoff"]).astimezone(PACIFIC)
+        st.badge(local.strftime("%a %-I:%M %p"), icon="🕐", color="gray")
+    else:
+        st.badge("TBD", color="gray")
 
-            return live_scores
 
-        # Get unique teams that were picked
-        picked_teams = set(pick[0].team_abbr for pick in picks)
-
-        # Get games for current week involving picked teams FROM DATABASE ONLY
-        games_query = db.query(Game).filter(
-            Game.season == current_season,
-            Game.week == current_week
-        ).filter(
-            (Game.home_team.in_(picked_teams)) | (Game.away_team.in_(picked_teams))
-        ).order_by(Game.kickoff)
-
-        games = games_query.all()
-
-        # Build the live scores data
-        live_scores = []
-
-        for game in games:
-            # Find who picked teams in this game
-            home_pickers = [
-                pick[1] for pick in picks  # pick[1] is Player.display_name
-                if pick[0].team_abbr == game.home_team  # pick[0] is Pick
-            ]
-            away_pickers = [
-                pick[1] for pick in picks  # pick[1] is Player.display_name
-                if pick[0].team_abbr == game.away_team  # pick[0] is Pick
-            ]
-
-            live_scores.append(create_game_display(game, home_pickers, away_pickers, db))
-
-        return live_scores
-
-    except Exception as e:
-        st.error(f"Error fetching live scores: {e}")
-        return []
-
-def render_live_scores_widget(db, current_season: int, current_week: int):
-    """
-    Render the live scores widget in Streamlit
-    """
-    from datetime import datetime, timedelta
-
-    # Tuesday reset logic: show next week's games if it's Tuesday after Monday games
-    today = datetime.now()
-    if today.weekday() == 1:  # Tuesday (0=Monday, 1=Tuesday, etc.)
-        # Check if Monday night game is over (typically ends by 11:30 PM ET = 3:30 AM UTC)
-        if today.hour >= 4:  # 4 AM UTC = 11 PM PST previous day
-            current_week += 1
-
-    # Create compact live scores widget
-    with st.expander(f"Week {current_week} Live Scores", expanded=False):
-
-        # Get live scores data
-        live_scores = get_live_scores_data(db, current_season, current_week)
-
-        if not live_scores:
-            st.info("**No games this week** - Game data will appear once loaded")
-            return
-
-        # Check if we're showing all games or just picked games
-        has_any_pickers = any(game['has_pickers'] for game in live_scores)
-        if has_any_pickers:
-            st.caption("Showing games for teams picked by players this week")
+def _team_row(side: Dict[str, Any], status: str) -> None:
+    name, score = st.columns([3, 1], vertical_alignment="center")
+    with name:
+        weight = "**" if side["outcome"] == "won" else ""
+        label = f"{weight}{side['team']}{weight}"
+        if side["picks"]:
+            entries = "entry" if side["picks"] == 1 else "entries"
+            label += f" &nbsp;`{side['picks']} {entries}`"
+        st.markdown(label)
+    with score:
+        if status == "pre" or side["score"] is None:
+            st.markdown("&nbsp;")
         else:
-            st.caption("No picks yet - showing all games this week")
+            weight = "**" if side["outcome"] == "won" else ""
+            st.markdown(f"{weight}{side['score']}{weight}")
 
-        # Sort by game status priority (live games first, then by kickoff time)
-        def sort_key(game):
-            status_priority = {'in': 0, 'pre': 1, 'final': 2}
-            return (status_priority.get(game['status'], 3), game['kickoff'])
 
-        live_scores.sort(key=sort_key)
+def _render_card(card: Dict[str, Any]) -> None:
+    with st.container(border=True):
+        head, line = st.columns([2, 1], vertical_alignment="center")
+        with head:
+            _status_chip(card)
+        with line:
+            if card["line"]:
+                st.caption(card["line"])
 
-        # Show games in simple text format (no complex layouts)
-        for i, game in enumerate(live_scores):
-            try:
+        _team_row(card["away"], card["status"])
+        _team_row(card["home"], card["status"])
 
-                # Simple game header with status
-                if game['status'] == 'in':
-                    status_text = "🔴 **LIVE**"
-                elif game['status'] == 'final':
-                    status_text = "✅ **FINAL**"
-                else:
-                    status_text = f"🕐 **{game['status_display']}**"
+        # The survivor angle, and the reason this isn't just a scoreboard.
+        if card["eliminated"] or card["survived"]:
+            if card["eliminated"]:
+                st.badge(f"{card['eliminated']} eliminated", icon="💀", color="red")
+            if card["survived"]:
+                st.badge(f"{card['survived']} survive", icon="✅", color="green")
 
-                # Basic game info
-                if game['status'] != 'pre':
-                    game_line = f"{status_text} {game['away_team']} {game['away_score']} - {game['home_score']} {game['home_team']}"
-                else:
-                    game_line = f"{status_text} {game['away_team']} @ {game['home_team']}"
 
-                st.markdown(game_line)
+def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> None:
+    """The week's scoreboard, as a two-column grid of cards.
 
-                # Show kickoff time for PRE games
-                if game['status'] == 'pre' and game['kickoff']:
-                    from datetime import timezone
-                    import pytz
-                    pacific = pytz.timezone('America/Los_Angeles')
-                    kickoff_pacific = game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pacific)
-                    kickoff_time = kickoff_pacific.strftime('%m/%d %I:%M %p')
-                    tz_abbr = kickoff_pacific.strftime('%Z')
-                    st.caption(f"Kickoff: {kickoff_time} {tz_abbr}")
-
-                # Show betting odds for PRE games
-                if game['status'] == 'pre' and game['score_display'] != 'vs':
-                    st.caption(f"Line: {game['score_display']}")
-
-                # Show elimination summary for final games
-                if game['status'] == 'final' and game['has_pickers']:
-                    survivor_counts = game['survivor_counts']
-                    survived = survivor_counts['survived']
-                    eliminated = survivor_counts['eliminated']
-
-                    if survived > 0 or eliminated > 0:
-                        st.success(f"🟢 **{survived} players survive to next week!**")
-                        if eliminated > 0:
-                            st.error(f"💀 **{eliminated} players to the graveyard!**")
-
-                # Show picker info (without nested expander)
-                all_pickers = game['away_pickers'] + game['home_pickers']
-                if all_pickers:
-                    picker_count = len(all_pickers)
-                    st.caption(f"📊 Picked by {picker_count} players")
-
-                    # Show picker summary without expansion
-                    if game['away_pickers']:
-                        st.caption(f"**{game['away_team']}**: {len(game['away_pickers'])} players")
-                    if game['home_pickers']:
-                        st.caption(f"**{game['home_team']}**: {len(game['home_pickers'])} players")
-
-                st.write("")  # Add spacing between games
-
-            except Exception as e:
-                st.error(f"Error rendering game {i+1}: {e}")
-                continue
-
-        # Add separator
-        st.divider()
-
-def render_compact_live_scores(db, current_season: int, current_week: int):
+    Built only from st.container(border=True) and st.badge, whose colours are
+    theme tokens. There are deliberately no colour literals in this module, so
+    it follows the app's surface wherever that lands.
     """
-    Render a more compact version for the sidebar or top of page
-    """
-    st.markdown("### 🏈 Live Scores")
+    data = get_week_scoreboard(season, week)
+    cards = build_scoreboard(
+        data["games"], data["pick_counts"], data["results"], reveal_picks
+    )
 
-    live_scores = get_live_scores_data(db, current_season, current_week)
+    st.markdown(f"### 🏈 Week {week}")
 
-    if not live_scores:
-        st.caption("No games for picked teams")
+    # Each empty state says WHY it is empty, not merely that it is.
+    if not data["games"]:
+        st.info(
+            f"**No week {week} schedule yet.** Games appear here once the score "
+            "ingestion job has pulled this week's fixtures."
+        )
+        return
+    if not cards:
+        # Reachable only with picks present and none of the picked teams
+        # playing: a bye week, or an abbreviation the sheet and the schedule
+        # disagree on. Sending the reader to check the sheet import would point
+        # them at the one thing that definitely worked.
+        st.info(
+            f"**No week {week} game features a picked team.** Every entrant is "
+            "on a team that isn't playing this week — usually a bye, or a team "
+            "abbreviation the sheet and the schedule spell differently."
+        )
         return
 
-    # Show only live and final games in compact view
-    active_games = [
-        game for game in live_scores
-        if game['status'] in ['in', 'final']
-    ]
-
-    if not active_games:
-        from datetime import timezone
-        import pytz
-        next_game = min(live_scores, key=lambda x: x['kickoff'])
-        pacific = pytz.timezone('America/Los_Angeles')
-        kickoff_pacific = next_game['kickoff'].replace(tzinfo=timezone.utc).astimezone(pacific)
-        st.caption(f"Next: {next_game['away_team']} @ {next_game['home_team']}")
-        st.caption(f"{kickoff_pacific.strftime('%m/%d %I:%M %p')}")
-        return
-
-    for game in active_games:
-        # Create a compact one-line display with enhanced status chips
-        if game['status'] == 'in':
-            status_chip = "🔴 **LIVE**"
-        elif game['status'] == 'final':
-            status_chip = "✅ **FINAL**"
-        else:
-            status_chip = "🕐 **PRE**"
-
-        st.markdown(
-            f"{status_chip} {game['away_team']} {game['away_score']} - "
-            f"{game['home_score']} {game['home_team']}"
+    if not reveal_picks:
+        st.caption(
+            "This week hasn't kicked off — showing the full slate. Pick counts "
+            "appear once the games start."
         )
+    elif not any(card["has_picks"] for card in cards):
+        st.caption("No picks in yet — showing every game this week.")
+
+    for row in range(0, len(cards), 2):
+        left, right = st.columns(2, gap="small")
+        with left:
+            _render_card(cards[row])
+        if row + 1 < len(cards):
+            with right:
+                _render_card(cards[row + 1])
