@@ -1,0 +1,443 @@
+# Plots & visual refresh — design spec
+
+**Status:** design approved; implementation not started
+**Branch:** `feature/ui-plots-overhaul` (based on `staging`)
+**Companion:** `docs/design/picks-grid-spec.md` — the reasoning this spec extends
+**Scope:** everything Session B is not covering. Explicitly NOT `app/live_scores.py`,
+`app/picks_grid.py`, or the `render_weekly_picks_chart` / live-scores regions of
+`app/main.py`.
+
+---
+
+## Why
+
+The owner's brief: *"the players remaining could stand to have an upgrade instead of
+the donut plot... and same with the dumbest picks and big balls picks maybe something
+more modern than just a table? and same with the pool insights graphs... this looks
+like an early 2000s website."*
+
+Three things the codebase adds to that, found before designing:
+
+1. **The donut is worse than it looks.** 2025 finished at **1 survivor of 252** — 19
+   is who *entered* week 14, not who came out. A donut of 1:251 is a solid ring. The
+   attrition curve has real shape and the donut throws it away.
+2. **None of these modules cache their database reads,** and `st.tabs` executes all
+   four tab bodies on every script run. `survivors.py` is a `2N + 2` N+1;
+   `chaos_meter.py` issues three queries per week in a loop (42 round trips for 2025).
+3. **103 emoji across five files**, in headings, labels and every table row.
+4. **~190 lines across the four modules are dead** — zero call sites. Two would raise
+   if reached: `render_weekly_chaos_summary` calls `calculate_chaos_score`, which does
+   not exist.
+
+## The measured constraint: dark surface vs. true team colour
+
+The approved direction is **broadcast dark** (`#0B1220`) *and* **true team colour on
+bars**, as in the picks grid. Those collide, and the picks-grid spec's own rule is
+that contrast gets computed, not assumed. Measured against `#0B1220`:
+
+**22 of 32 team colours fail WCAG 1.4.11's 3:1 floor for a graphic object.** The
+failures include the bars that matter most — `GB #203731` at **1.47:1** is the #1
+Team of Doom bar with 73 eliminations, and would be effectively invisible.
+
+### Resolution: `lift_color()`
+
+The mirror of the grid's `mute_color()`. Blend the fill up in HLS **lightness only**,
+preserving hue and saturation, until it clears the target ratio on the surface.
+
+Measured result: **all 32 teams clear 3:1**, minimum 3.01:1, hue preserved.
+`GB #203731 → #3E6A5E` is still recognisably Packers green.
+
+| Effect | Before | After |
+|---|---|---|
+| GB | `#203731` 1.47:1 | `#3E6A5E` 3.06:1 |
+| CHI | `#0B162A` 1.04:1 | `#2F5EB4` 3.01:1 |
+| LV | `#000000` 1.12:1 | `#616161` 3.02:1 |
+| PIT | `#FFB612` 10.66:1 | unchanged |
+
+**Two honest losses, accepted:** `LV` black cannot be rendered on black and becomes
+grey; `CHI` navy lifts far enough to read as blue. Both are tail teams (1 elimination
+each in 2025). Identity still comes from the row label.
+
+**Collisions after lifting:** among the top 8 doom teams, 3 of 28 pairs fall under
+CIE76 ΔE 20 — `LAR/BUF` at ΔE 0.6 are effectively identical. This is acceptable under
+the same rule the grid established: *each row is one team, named on the left, with the
+number in the row.* Colour is reinforcement, never the sole channel. If a future change
+moves teams off their own labelled rows, this must be revisited.
+
+---
+
+## Architecture
+
+| File | Change | DB access |
+|---|---|---|
+| `.streamlit/config.toml` | NEW — `base="dark"` | — |
+| `app/theme.py` | NEW — tokens, `contrast_fill`, `GLOBAL_CSS` | none |
+| `app/attrition.py` | NEW — sparkline + full curve figures | none |
+| `app/meme_cards.py` | NEW — ranked card rendering | none |
+| `app/dashboard_data.py` | + 4 cached functions; week clamp fix | all of it |
+| `app/team_of_doom.py` | rewrite as view-only | none |
+| `app/graveyard.py` | rewrite as view-only | none |
+| `app/survivors.py` | rewrite as view-only | none |
+| `app/chaos_meter.py` | rewrite as view-only | none |
+| `app/main.py` | CSS → theme, KPI row, tab bodies, meme call | none |
+
+### Why `base="dark"` in config rather than more CSS
+
+`main.py`'s current CSS block is a wall of `!important` because it is fighting
+Streamlit's light base. Setting the base makes Streamlit's own widgets — tabs,
+dataframes, selectboxes — render dark natively, so those overrides get **deleted
+rather than extended**.
+
+### Why `theme.py` imports from `picks_grid` rather than copying
+
+The backlog records that theme tokens are already forked between `picks_grid.py` and
+`mobile_plotly_config.py`, and that the white-on-white hover bug was consequently
+fixed twice in two places. `theme.py` imports `relative_luminance`, `label_ink` and
+`mute_color` from `picks_grid` — one import line, no edit to Session B's file, and no
+third fork. If Session B refactors that module, this is one import to repoint at
+rebase.
+
+Moving `GLOBAL_CSS` out of `main.py` also shrinks its CSS region from ~70 lines to
+one. That is deliberate: it is the likeliest conflict with Session B.
+
+### Data layer
+
+Every widget module loses database access entirely. Signatures change from
+`render_x(db, season)` to `render_x(season)`, so the four `SessionLocal()` blocks in
+`main.py`'s Pool Insights tabs are deleted with them.
+
+| Function | Replaces | Round trips |
+|---|---|---|
+| `get_attrition_series(season)` | `chaos_meter`'s per-week loop | **42 → 1** (2025) |
+| `get_survivor_board(season, week)` | `survivors.py`'s N+1 | **2N+2 → 1** |
+| `get_doom_teams(season)` | `team_of_doom`'s Python aggregation | 1 |
+| `get_graveyard(season)` | `graveyard.py`'s query | 1 |
+
+All `@st.cache_data(ttl=60)`, all closing their session in a `finally`, all returning
+plain dicts and lists so the `render_*` functions are pure view code.
+
+`get_attrition_series` is the shared spine — it feeds the KPI sparkline, the
+Elimination Tracker's season chart, and the Survivors board's context line. One query
+replaces three separate widgets' worth of counting.
+
+### One semantic fix: doom attribution
+
+`get_doom_teams` attributes each player to their **first** elimination
+(`MIN(week)` per player), which is what `graveyard.py` already does. The current
+`team_of_doom.py` counts *every* losing pick.
+
+In 2025 these coincide exactly — GB is 73 both ways — because eliminated players stop
+filling in the sheet, so their later rows are null picks that the inner join to `games`
+drops. They are still not the same question, and the current code answers the wrong
+one. A season where eliminated entrants keep picking would diverge.
+
+---
+
+## Components
+
+### Players Remaining → attrition sparkline
+
+The donut is deleted. The "Players Remaining" KPI card carries a sparkline beneath its
+number. This frees the donut's half-width column, so **Find a Survivor becomes full
+width**.
+
+The 2025 series the design is tuned against:
+
+```
+W1 252 · W2 246 · W3 238 · W4 171 · W5 127 · W6 74 · W7 61
+W8 60 · W9 39 · W10 32 · W11-13 21 · W14 19 → 1
+```
+
+Weeks 3–5 remove 164 of 252. Weeks 11–12 remove nobody. The curve is a cliff followed
+by a plateau, which is the story the donut cannot tell.
+
+### Meme stats → ranked cards
+
+`#1` gets hero treatment (large margin numeral, matchup, victim count); ranks 2–5 are
+compact rows.
+
+**Big Balls must degrade gracefully.** Every 2025 game has `point_spread = NULL`, so
+`was_underdog` is always false and the panel collapses to road wins with counts of 1.
+The card therefore leads with matchup and week, and treats the underdog badge as
+optional garnish rather than the headline.
+
+### Pool Insights charts
+
+- **Team of Doom** — horizontal ranked bars, lifted team colour, `label_ink`-computed
+  labels. The 2025 distribution is radically top-heavy (73, 32, 28, 24, 23, 16, 12,
+  then a tail of 1–8), so rank order carries the meaning and colour is identity only.
+- **Graveyard** — eliminations-per-week bars. Drops `color_continuous_scale="Reds"`,
+  which encoded magnitude twice: once as bar height, once as fill.
+- **Survivors** — same treatment; drops the `"Greens"` gradient.
+- **Elimination Tracker** — **the gauge is deleted.** It is the most dated object in
+  the app. Replaced by a large numeral plus the attrition curve with the current week
+  marked, reusing `attrition.py` rather than introducing a fifth chart idiom.
+
+### Surface is a token, not a decision baked into components
+
+`theme.py` defines **both** palettes and selects between them with a single switch.
+Every colour any component uses resolves through that switch; no component holds a
+surface literal. A light/dark reversal is therefore one line, not a rewrite.
+
+This is deliberate insurance: the dark direction was chosen by the owner, but a
+parallel session has since recommended light to them and the question is not closed.
+Building surface-agnostic costs almost nothing and makes the reversal cheap either way.
+
+Exported tokens, consumed by this branch and by Session B:
+
+`SURFACE` · `SURFACE_RAISED` · `INK` · `INK_MUTED` · `BORDER` · `DANGER` · `WIN` ·
+`PENDING`
+
+`SURFACE` replaces `APP_SURFACE` at `main.py:62` and remains what
+`build_picks_grid(background=...)` receives. `DANGER` resolves to `#B91C1C` on light
+and `#EF4444` on dark.
+
+### `contrast_fill` applies to floating marks, and to the grid's current week
+
+The distinction that makes surface choice and colour fidelity independent:
+
+- **A bounded mark** — a grid cell — is a rectangle with a hairline border and
+  contrast-derived label ink. Its legibility does not depend on fill-vs-surface
+  contrast at all: the border delimits it and the ink is computed from the fill.
+  Verified across all 32 teams — `LV #000000` takes white ink, `PIT #FFB612` takes
+  dark ink. **A bounded cell keeps true team colour on any surface.**
+- **A floating mark** — a Team of Doom bar — sits directly on the surface with no
+  border. Its legibility is entirely fill-vs-surface contrast, which is where 22 of 32
+  teams fail on dark and where `contrast_fill` is required.
+
+So `contrast_fill` is scoped to this branch's bars. The picks grid neither needs nor
+imports it, and keeps actual team colours rather than lifted approximations.
+
+This also keeps Session B's two muting axes orthogonal: history mutes on **lightness**
+preserving hue, elimination mutes on **saturation** dropping it. `contrast_fill` moves
+lightness, which would collide — hence it stays out of that module entirely.
+
+
+### Ruling: the grid's current week is lifted
+
+The bounded/floating distinction above is about **legibility** and it holds. A second
+property — **emphasis**, whether the current week still separates from muted history —
+does degrade on the dark surface, because that separation is bounded by the distance
+from a team's colour to the ground.
+
+Measured on the real Week 6 2025 grid (CIE76 between a team's current-week cell and
+its muted history):
+
+| | worst separation |
+|---|---|
+| Dark, true colour | ΔE 7.8 (LV) |
+| Dark, current week lifted | ΔE 35.0 |
+| Light, true colour | ΔE 46.1 |
+
+An alternative — muting history toward `SURFACE_RAISED` instead of `SURFACE` — was
+tested and is **worse**: min ΔE 3.1, five teams under 10. Rejected.
+
+**The owner ruled on a rendered three-way comparison of the real grid, not on these
+numbers:** dark, with the current week lifted. So `contrast_fill` is scoped as
+*not for legibility, yes for emphasis on the current week*. History is untouched, and
+`HISTORY_MIX` must not move — raising it pushes muted toward true, lowering it pins
+muted to the surface.
+
+Session B's two muting axes survive: `contrast_fill` moves lightness but only on the
+current week, which neither history-muting (lightness) nor elimination-muting
+(saturation) touches.
+
+Accepted cost, looked at explicitly before ruling: `LV #000000` lifts to `#616161`.
+Black cannot be shown on black. Four picks in the 2025 season.
+
+
+### Rebase action: `contrast_fill` moves to `picks_grid`
+
+Session B lands `contrast_fill` in `app/picks_grid.py` alongside `contrast_ratio`,
+`ensure_contrast`, `eliminated_fill`, `eliminated_edge`, `cell_edge` and
+`history_ink`. Their reasoning is correct and is the argument this spec already
+makes for the other three helpers: `theme.py` imports the colour maths from
+`picks_grid` so it is not forked, and since `picks_grid` merges first it cannot
+import a module that does not yet exist on `staging`.
+
+The same constraint applies in reverse here, which is why this branch defines its
+own for now: it cannot import from a `picks_grid` it does not have. **At rebase,
+delete this branch's `contrast_fill` and re-export theirs**, keeping the dependency
+direction `theme -> picks_grid`.
+
+The two implementations were specified to the same behaviour — bidirectional,
+hue-preserving via HSL, minimal movement, identity when already passing — so the
+swap should be behaviour-neutral. `tests/test_theme.py` asserts all of those
+properties against the real 32 team colours and will validate theirs on contact.
+
+Also at rebase: `app/main.py:62` `APP_SURFACE = "#F8FAFC"` becomes
+`from app.theme import SURFACE`. `EMPHASIS_MIN_CONTRAST = 3.0` beside it stays a
+number — it is a WCAG threshold, not a colour.
+
+**Not adopted:** `INK_MUTED` for the grid's history ink. Session B's `history_ink(fill)`
+computes from the actual muted fill rather than from `SURFACE`, and history cells are
+not `SURFACE` — they are `mute_color(team, SURFACE)`, a per-team distance off it. Same
+reasoning as `DANGER`: a token calibrated against the surface is not the right answer
+for something sitting on a fill. `INK_MUTED` stays correct for this branch's widgets,
+which do sit on `SURFACE`.
+
+### Emoji: removed, not reduced
+
+There are **103 emoji across the five files this branch touches**. They are a large
+part of why the app reads as dated, and they fight the broadcast direction directly:
+`### 💀 Team of Doom` cannot sit in the same design language as an oversized numeral
+on a slate field.
+
+The rule applied here:
+
+- **No emoji in headings, section titles, metric labels, or as row decoration.**
+  `⚰️ Graveyard Board` becomes `GRAVEYARD` — uppercase, letterspaced, in the muted
+  ink token. `💀 {player}` in a table row becomes `{player}`; the section already
+  says what these rows are.
+- **Where an emoji encoded status, it becomes a colour-coded text badge**, not
+  another glyph. `🐕` / `🛣️` on a Big Balls card become `UNDERDOG` / `ROAD`.
+  `✅ Won` / `⏳ Pending` become a coloured dot plus the word.
+- **Empty-state messages lose their leading emoji too** — the §7 messages are plain
+  sentences.
+
+Two reasons beyond taste. Screen readers announce every emoji by name, so a table
+with a skull per row reads as "skull" 251 times. And emoji render with the platform's
+own colours, which no amount of theming controls — a full-colour glyph is the one
+thing on the page that ignores the token system entirely.
+
+**Scope note:** this covers this branch's files only. Session B's live-scores and
+picks-grid regions keep theirs, so the app will be briefly inconsistent between their
+merge and this one. Worth raising with them at reconciliation rather than editing
+their files here.
+
+### Empty states
+
+From the roadmap (*"Every empty state needs its own message"*). Load-bearing right
+now: production is 2026 with 5 entrants, week 1, every game `pre`, so most of these
+panels are empty **today**. Each names the specific precondition it is waiting on.
+
+| Widget | Message names |
+|---|---|
+| Attrition sparkline | the curve starts once week 1 goes final |
+| Team of Doom | nobody eliminated yet; fills in when a picked team loses |
+| Graveyard | first headstone lands when a picked team loses a completed week |
+| Elimination Tracker | week 1 hasn't finished; rates appear when a week goes final |
+| Dumbest Picks | ranks the worst beatings once picks start losing |
+| Big Balls | road and underdog wins land here after week 1 |
+
+---
+
+---
+
+## The dark surface's blast radius
+
+Changing the surface breaks light-mode assumptions baked into already-merged code.
+Enumerated below with ownership, because most of the damage is outside this branch's
+files. All verified against the code at `06f61fc`.
+
+### Mine to fix — the shared chart theming layer
+
+`app/mobile_plotly_config.py` is **not** in Session B's excluded set, and every one of
+its six `render_mobile_chart` call sites is in a file this branch owns
+(`graveyard`, `team_of_doom`, `survivors`, `chaos_meter`, and the donut in `main.py`
+that is being deleted). The picks grid is the only chart that bypasses it. So this
+layer can be re-tokenized with **zero Session B call sites** — it is the single
+biggest sweep and it is entirely self-contained.
+
+| Problem | Location |
+|---|---|
+| `MOBILE_LAYOUT_DEFAULTS` sets font `#0F172A` on transparent paper/plot backgrounds — dark ink on a dark surface for every chart routing through it | `mobile_plotly_config.py` (14 occurrences of `#0F172A`) |
+| `apply_mobile_optimization` sets hover `bgcolor="white"` with `#0F172A` ink — a white tooltip on a dark app | `mobile_plotly_config.py:109` |
+| `MOBILE_COLORS` is the default matplotlib-era palette (`#1f77b4`, `#d62728`) | `mobile_plotly_config.py:151` |
+| `create_touch_annotation` hardcodes `rgba(255,255,255,0.8)` and `color="black"` | `mobile_plotly_config.py:136` |
+
+**Re-tokenize, do not revert.** The hover font colour was only just added — before
+that it set no font colour at all and Plotly's auto-contrast rendered white on white.
+Dropping the key would restore that bug in a new form.
+
+`MOBILE_COLORS` loses both its consumers under this branch (the donut is deleted;
+`chaos_meter` imports `get_mobile_color_scheme` without using it), and
+`create_touch_annotation` already has **zero call sites** — both go with the dead code.
+
+`APP_SURFACE` in `main.py:62` is a one-line token swap. It is threaded through to
+`build_picks_grid(background=...)`, which is what earlier weeks' cells blend toward
+via `mute_color`. Pointing it at the dark surface makes the grid's muting work
+unchanged; leaving it makes every history cell blend toward white and glow. The
+constant lives in this branch's region even though its consumer does not.
+
+### To raise with Session B — not edited here
+
+Three fixes land in `app/picks_grid.py`, which this branch does not own. This branch
+is what makes them live; none is a regression it introduces.
+
+1. **History ink is hardcoded.** `color=label_ink(fill) if is_now else "#52514e"`
+   (`picks_grid.py:236`). Already logged as latent in the backlog. The fix is *not*
+   `label_ink(fill)` unconditionally — the softer grey is deliberate, it makes history
+   recede while the current week pops. It needs a dark-surface equivalent of "receded
+   but legible": a dimmed token, not full-contrast ink.
+2. **A hardcoded light tooltip** — `bgcolor="#ffffff"`, `bordercolor="#d3d6dc"`,
+   font `#0b0b0b` (`picks_grid.py:279-281`).
+3. **The border rule inverts.** `line=dict(width=1, color="rgba(0,0,0,.12)" if
+   relative_luminance(fill) > 0.6 else fill)` (`picks_grid.py:226`) draws a dark
+   hairline so *light* fills do not dissolve into a *light* surface. On a dark surface
+   the threshold flips: dark fills are the ones that vanish and need a light hairline.
+   Same idea, opposite side of the comparison.
+
+**The picks-grid encoding stays intact.** Muted = earlier week, full colour = current
+week, colour carries identity rather than magnitude. This branch changes the surface
+that encoding sits on, which is why `contrast_fill`'s hue preservation is the right
+property — but the encoding itself is approved and locked, and amending it is the
+owner's call, not a between-sessions one.
+
+## Performance and rules
+
+- `@st.fragment` on the two tabs carrying filter widgets (Graveyard, Team of Doom), so
+  changing a filter stops re-running the whole page. This is the backlog's specific
+  complaint that `st.tabs` executes all four bodies on every run.
+- **Rule 3 (never render an unplayed week's picks):** `get_player_data` currently
+  returns every pick for the season with no week clamp, so "Find a Survivor" exposes
+  future picks — the exact leak the picks grid exists to prevent. Clamped here.
+- **CLAUDE.md caching convention:** every database read cached with `ttl=60` and every
+  session closed in a `finally`. The review found this violated across precisely the
+  files this branch touches.
+- **Mobile-first:** charts must survive a 390px viewport, verified on one.
+
+## Dead code removed
+
+Zero call sites, confirmed by grep across `app/` and `tests/`:
+
+`render_memorial_wall`, `render_graveyard_timeline` (graveyard) ·
+`render_doom_details` (team_of_doom) · `render_survivor_timeline`,
+`get_eliminated_count` (survivors) · `render_chaos_explanation`,
+`render_weekly_chaos_summary`, and the `calculate_chaos_score` call it makes to a
+function that does not exist (chaos_meter).
+
+`render_survivor_timeline` also calls `len()` on `get_eliminated_count`'s `int`
+return — it would `TypeError` if anything reached it.
+
+## Testing
+
+Logic lives in pure functions so it is reachable without a Streamlit runtime, the same
+approach that made `picks_grid` testable.
+
+- `tests/test_theme.py` — `contrast_fill` holds the 3:1 floor for all 32 real team
+  colours, preserves hue, is idempotent, and leaves already-passing colours untouched.
+- `tests/test_attrition.py` — series shaping, the single-week case, the plateau case.
+- `tests/test_dashboard_data.py` — doom ranking and tie-breaks, the `get_player_data`
+  week clamp.
+
+The existing 60 tests must stay green. Verified against 2025 (252 → 1, real
+eliminations) and 2026 (5 entrants, all `pre`) before the PR.
+
+## Integration
+
+Merge order is #28 (landed) → Session B → this branch. Session B had not committed
+when this was designed, so their live-scores card idiom could not be read. The agreed
+approach is that this branch defines the tokens in `theme.py` and **reconciles at
+rebase**, adapting their cards onto those tokens during conflict resolution.
+
+Conflicts are expected in `app/main.py` and `app/dashboard_data.py`. Edits here are
+kept regionally scoped — and `GLOBAL_CSS` is moved out of `main.py` specifically to
+shrink the shared surface.
+
+## Out of scope
+
+- Session B's files, listed at the top.
+- The backlog's remaining items: survivor-aware grid counts, the Thursday-kickoff
+  reveal, the pre-season reveal, ingestion-side abbreviation validation. All are
+  product calls or belong to other files.
