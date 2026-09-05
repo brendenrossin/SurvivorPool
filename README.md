@@ -1,38 +1,20 @@
-# NFL Survivor Pool Dashboard 🏈
+# Survivor Pool Dashboard
 
-A production-ready web application for running NFL survivor pools with automated data ingestion, real-time score tracking, and interactive visualizations.
+A cheap-to-run, single-page web app that auto-ingests weekly picks from Google Sheets, fetches live NFL scores, determines who "survived," and renders fun, shareable visuals.
 
-**Live Demo:** [https://nfl-survivor-2025.up.railway.app/](https://nfl-survivor-2025.up.railway.app/)
+## Features
 
-[![Tech Stack](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
-[![Framework](https://img.shields.io/badge/Streamlit-1.28-red)](https://streamlit.io)
-[![Database](https://img.shields.io/badge/PostgreSQL-15-blue)](https://postgresql.org)
-[![Hosting](https://img.shields.io/badge/Railway-Deployed-success)](https://railway.app)
-
-## ✨ Features
-
-### Core Functionality
-- **📊 Automated Data Ingestion**: Seamlessly syncs with Google Sheets to import weekly picks
-- **🏈 Real-Time NFL Scores**: Fetches live game data from ESPN API
-- **🎰 Betting Odds Integration**: Real-time point spreads from The Odds API
-- **🔄 Scheduled Cron Jobs**: Automated updates during game days (Sundays, Mondays, Thursdays)
-
-### Interactive Dashboard
-- **📈 Dynamic Visualizations**:
+- 📊 **Google Sheets Integration**: Automatically ingests picks from Google Sheets
+- 🏈 **Live NFL Scores**: Fetches real-time game data from ESPN
+- 🎰 **Betting Odds Integration**: Real-time point spreads from The Odds API (free tier)
+- 📈 **Interactive Dashboard**: Streamlit-based dashboard with:
   - Remaining players donut chart
-  - Weekly team picks distribution (stacked bar chart)
-  - Historical elimination trends
-- **🔍 Player Analytics**:
-  - Individual pick history and search
-  - Notable picks tracking (underdog wins 🐕, risky choices)
-  - Pool insights (Team of Doom, Graveyard view, Elimination tracker)
-- **📱 Mobile-Optimized**: Responsive design with mobile-first chart configurations
-
-### Technical Highlights
-- **⚡ Performance**: Streamlit caching for sub-second load times
-- **💰 Cost-Effective**: Optimized for free-tier hosting (Railway, Fly.io)
-- **🛡️ Robust Error Handling**: Graceful fallbacks and comprehensive logging
-- **🎨 Custom Styling**: Team colors and logos for enhanced visual appeal
+  - Weekly picks grid (teams × weeks, leading with the current week)
+  - Player search and history
+  - Notable picks (dumbest picks, underdog wins with 🐕 emoji)
+  - Pool insights (Team of Doom, Graveyard, Elimination Tracker)
+- 🔄 **Automated Jobs**: Scheduled data ingestion and score updates
+- 🚀 **Lightweight**: Designed for free-tier hosting (Railway, Fly.io, etc.)
 
 ## Quick Start
 
@@ -105,38 +87,29 @@ streamlit run app/main.py
 
 Visit `http://localhost:8501` to see your dashboard!
 
-## 📁 Project Structure
+## Project Structure
 
 ```
-survivor-pool/
-├── app/                    # 🎨 Streamlit dashboard application
-│   ├── main.py            #    Main dashboard entry point
-│   ├── dashboard_data.py  #    Cached data fetching layer
-│   └── live_scores.py     #    Live game status widgets
-├── api/                   # 🔌 Core API and data models
-│   ├── database.py        #    Database connection & session management
-│   ├── models.py          #    SQLAlchemy ORM models
-│   ├── sheets.py          #    Google Sheets integration
-│   ├── oauth_manager.py   #    OAuth token refresh automation
-│   └── score_providers.py #    NFL data provider interfaces (ESPN, SportRadar)
-├── jobs/                  # ⚙️ Background worker jobs
-│   ├── ingest_sheet.py    #    Google Sheets → Database sync
-│   ├── update_scores.py   #    NFL scores ingestion
-│   ├── update_odds.py     #    Betting odds ingestion
-│   └── backfill_weeks.py  #    Historical data backfill utility
-├── db/                    # 🗄️ Database schemas and seeds
-│   ├── migrations.sql     #    PostgreSQL schema definition
-│   └── seed_team_map.json #    NFL team colors/logos metadata
-├── scripts/               # 🛠️ Development and utility scripts
-├── cron/                  # 📅 Railway cron job configurations
-├── public/logos/          # 🏈 NFL team logos (optional)
-├── .credentials/          # 🔐 OAuth tokens and service accounts (gitignored)
-├── Dockerfile             # 🐳 Container build configuration
-├── start.sh               # 🚀 Railway startup script
-└── railway*.toml          # 🚂 Railway service configurations (DO NOT MOVE!)
+survivor-dashboard/
+├── app/                    # Streamlit dashboard
+│   ├── main.py            # Main dashboard app
+│   └── dashboard_data.py  # Data fetching functions
+├── api/                   # Core API and data models
+│   ├── database.py        # Database connection
+│   ├── models.py          # SQLAlchemy models
+│   ├── sheets.py          # Google Sheets client
+│   └── score_providers.py # NFL data providers
+├── jobs/                  # Background jobs
+│   ├── ingest_sheet.py    # Google Sheets ingestion
+│   ├── update_scores.py   # NFL scores updates
+│   └── backfill_weeks.py  # Historical data backfill
+├── db/                    # Database files
+│   ├── migrations.sql     # Database schema
+│   └── seed_team_map.json # Team colors and metadata
+├── public/logos/          # Team logos (optional)
+├── requirements.txt       # Python dependencies
+└── .env.example          # Environment template
 ```
-
-> **Note:** The `railway*.toml` files **must** remain in the root directory for Railway deployment to function properly.
 
 ## Google Sheets Format
 
@@ -258,36 +231,14 @@ Job metadata is stored in the `job_meta` table:
 SELECT * FROM job_meta ORDER BY last_run_at DESC;
 ```
 
-## 🏗️ Architecture & Design Decisions
+## Contributing
 
-### Database-First Architecture
-All data flows through PostgreSQL with no real-time API calls in the UI, ensuring consistent performance and reducing external API dependency.
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test locally
+5. Submit a pull request
 
-### Caching Strategy
-Aggressive use of Streamlit's `@st.cache_data` and `@st.cache_resource` decorators for sub-second page loads, with intelligent TTL settings (60s for live data, longer for static data).
+## License
 
-### Mobile-First Design
-Charts and UI components are optimized for mobile viewing with:
-- Limited annotation density
-- Touch-friendly controls
-- Responsive layouts
-
-### Cost Optimization
-Designed to run on free-tier infrastructure:
-- Minimal database queries with proper indexing
-- Efficient cron job scheduling (only during game windows)
-- SQLAlchemy session management to prevent connection leaks
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## 📄 License
-
-MIT License - feel free to use this project for your own survivor pools!
-
----
-
-**Built with ❤️ for NFL fans by Brent Rossin**
-
-*Questions or feedback? Open an issue or reach out!*
+MIT License - see LICENSE file for details.

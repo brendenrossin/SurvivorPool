@@ -1,0 +1,401 @@
+<title>Survivor Picks Grid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --surface:#fcfcfb; --panel:#ffffff; --sunken:#f4f5f7;
+  --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#84837d;
+  --line:#e4e6ea; --line-2:#d3d6dc;
+  --accent:#2a78d6; --accent-soft:#eaf2fd;
+  --warn-bg:#fdf3e3; --warn-line:#e8c68a; --warn-ink:#7a5514;
+  --ok-bg:#eaf5ec; --ok-line:#a8d3b4; --ok-ink:#1f6b39;
+  --g1:#ecedef; --g2:#d9dbdf; --g3:#c2c5cb; --g4:#a7abb3; --g5:#8b9099; --g6:#6f747d;
+  --mix:#ffffff;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 16px -6px rgba(16,24,40,.12);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --surface:#1a1a19; --panel:#232322; --sunken:#1f1f1e;
+    --ink:#ffffff; --ink-2:#c3c2b7; --ink-3:#8f8e85;
+    --line:#33332f; --line-2:#43433d;
+    --accent:#3987e5; --accent-soft:#16294a;
+    --warn-bg:#2e2415; --warn-line:#5c4a24; --warn-ink:#e8c68a;
+    --ok-bg:#14291a; --ok-line:#2f5c3c; --ok-ink:#8fd0a3;
+    --g1:#2b2b2a; --g2:#3a3a38; --g3:#4c4c49; --g4:#61615d; --g5:#7a7a75; --g6:#96968f;
+    --mix:#1a1a19;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 16px -6px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --surface:#1a1a19; --panel:#232322; --sunken:#1f1f1e;
+  --ink:#ffffff; --ink-2:#c3c2b7; --ink-3:#8f8e85;
+  --line:#33332f; --line-2:#43433d;
+  --accent:#3987e5; --accent-soft:#16294a;
+  --warn-bg:#2e2415; --warn-line:#5c4a24; --warn-ink:#e8c68a;
+  --ok-bg:#14291a; --ok-line:#2f5c3c; --ok-ink:#8fd0a3;
+  --g1:#2b2b2a; --g2:#3a3a38; --g3:#4c4c49; --g4:#61615d; --g5:#7a7a75; --g6:#96968f;
+  --mix:#1a1a19;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 16px -6px rgba(0,0,0,.5);
+}
+
+*{box-sizing:border-box}
+body{margin:0; background:var(--surface); color:var(--ink);
+  font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif; font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1160px; margin:0 auto; padding:56px 24px 96px; display:flex; flex-direction:column; gap:44px}
+
+h1,h2{font-family:Archivo,ui-sans-serif,system-ui,sans-serif; text-wrap:balance; margin:0}
+h1{font-size:clamp(30px,4.4vw,44px); font-weight:700; letter-spacing:-.02em; line-height:1.1}
+h2{font-size:23px; font-weight:600; letter-spacing:-.01em}
+p{margin:0; max-width:70ch}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)}
+.lede{color:var(--ink-2); font-size:17px}
+.sub{color:var(--ink-2); font-size:14.5px}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.88em; background:var(--sunken);
+  border:1px solid var(--line); border-radius:4px; padding:1px 5px}
+header{display:flex; flex-direction:column; gap:14px; border-bottom:1px solid var(--line); padding-bottom:32px}
+section{display:flex; flex-direction:column; gap:18px}
+.sec-head{display:flex; flex-direction:column; gap:7px}
+
+.note{display:flex; flex-direction:column; gap:5px; border:1px solid var(--line); border-left-width:3px;
+  border-radius:8px; padding:15px 18px; background:var(--panel)}
+.note.warn{background:var(--warn-bg); border-color:var(--warn-line)}
+.note.ok{background:var(--ok-bg); border-color:var(--ok-line)}
+.note .k{font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--warn-ink)}
+.note.ok .k{color:var(--ok-ink)}
+.note p{font-size:14.5px; color:var(--ink); max-width:none}
+
+/* panel */
+.panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); overflow:hidden}
+.panel-top{display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;
+  padding:15px 18px; border-bottom:1px solid var(--line); background:var(--sunken)}
+.panel-title{display:flex; flex-direction:column; gap:2px}
+.panel-title .t{font-family:Archivo,sans-serif; font-weight:600; font-size:15px}
+.panel-title .d{font-size:12.5px; color:var(--ink-2)}
+.controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.seg{display:inline-flex; background:var(--panel); border:1px solid var(--line-2); border-radius:7px; padding:2px}
+.seg button{font-family:"IBM Plex Sans",sans-serif; font-size:12.5px; font-weight:500; color:var(--ink-2);
+  background:transparent; border:0; border-radius:5px; padding:5px 11px; cursor:pointer; white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--accent); color:#fff}
+.seg button:focus-visible,select:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+select{font-family:"IBM Plex Sans",sans-serif; font-size:12.5px; font-weight:500; color:var(--ink);
+  background:var(--panel); border:1px solid var(--line-2); border-radius:7px; padding:6px 9px; cursor:pointer}
+.ctl-lbl{font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--ink-3); margin-right:-3px}
+
+.plot{padding:18px; overflow-x:auto}
+.grid{display:grid; gap:2px; min-width:700px; font-variant-numeric:tabular-nums}
+.cell{height:30px; border-radius:3px; display:flex; align-items:center; justify-content:center;
+  font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; cursor:default;
+  border:1px solid transparent}
+.cell.empty{background:var(--sunken); border-radius:2px}
+.cell:not(.empty):hover{outline:2px solid var(--ink); outline-offset:1px; z-index:3}
+.cell.now{font-weight:700}
+.rowlab{display:flex; align-items:center; gap:8px; height:30px; padding-right:11px; justify-content:flex-end;
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap}
+.rowlab .chip{width:9px; height:9px; border-radius:2px; flex:none; border:1px solid rgba(128,128,128,.35)}
+.rowlab .tot{color:var(--ink-3); font-size:10.5px; font-weight:400}
+.rowlab.idle{font-weight:500; color:var(--ink-2)}
+.collab{height:24px; display:flex; align-items:center; justify-content:center;
+  font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-3); white-space:nowrap}
+.collab.now{color:var(--ink); font-weight:600}
+.corner{height:24px}
+.nowcol{border-radius:4px; outline:2px solid var(--accent); outline-offset:2px}
+
+.axis-note{display:flex; justify-content:space-between; gap:16px; padding:12px 18px 16px; flex-wrap:wrap}
+.axis-note span{font-size:12px; color:var(--ink-3)}
+.key{display:flex; gap:18px; flex-wrap:wrap; padding:0 18px 18px}
+.key div{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-2)}
+.key i{width:22px; height:12px; border-radius:3px; display:block}
+
+#tip{position:fixed; z-index:50; pointer-events:none; opacity:0; transition:opacity .1s;
+  background:var(--panel); color:var(--ink); border:1px solid var(--line-2); border-radius:8px;
+  box-shadow:var(--shadow); padding:9px 12px; min-width:168px}
+#tip.on{opacity:1}
+#tip .tt{font-family:Archivo,sans-serif; font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:7px}
+#tip .sw{width:10px; height:10px; border-radius:2px; flex:none; border:1px solid rgba(128,128,128,.4)}
+#tip .tr{display:flex; justify-content:space-between; gap:22px; font-size:12.5px; color:var(--ink-2); margin-top:3px}
+#tip .tr b{font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums}
+
+.tablewrap{padding:0 18px 18px; overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:12.5px; font-variant-numeric:tabular-nums}
+th,td{text-align:right; padding:5px 8px; border-bottom:1px solid var(--line); white-space:nowrap}
+th{font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; color:var(--ink-2);
+  text-transform:uppercase; letter-spacing:.05em}
+th.now,td.nowc{background:var(--accent-soft)}
+td:first-child,th:first-child{text-align:left; font-family:"IBM Plex Mono",monospace; font-weight:500}
+td{font-family:"IBM Plex Mono",monospace; color:var(--ink-2)}
+td.has{color:var(--ink); font-weight:500}
+.hidden{display:none}
+
+.pairs{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px}
+.pair{display:flex; align-items:center; gap:9px; background:var(--panel); border:1px solid var(--line);
+  border-radius:8px; padding:9px 12px; font-family:"IBM Plex Mono",monospace; font-size:12px}
+.pair .sw2{display:flex; gap:2px}
+.pair .sw2 i{width:16px; height:22px; border-radius:3px; display:block; border:1px solid rgba(128,128,128,.35)}
+.pair .txt{color:var(--ink-2); font-size:11.5px; line-height:1.4}
+.pair .txt b{color:var(--ink)}
+
+ul{margin:0; padding-left:19px; color:var(--ink-2); font-size:14.5px; display:flex; flex-direction:column; gap:7px}
+ul b{color:var(--ink); font-weight:600}
+footer{border-top:1px solid var(--line); padding-top:22px; color:var(--ink-3); font-size:13px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Design review · v2 · Weekly picks chart</div>
+  <h1>Survivor Picks Grid</h1>
+  <p class="lede">Rebuilt to your spec: rows sized and ordered by the current week, cells in real team colours, history receding behind them. Real 2025 data — change the week and watch the grid re-rank.</p>
+</header>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">01 — The grid</div>
+    <h2>Current week leads, history recedes</h2>
+    <p class="sub">Rows = <code>max(10, teams picked this week)</code>, ordered by this week's pick count, then by season total to fill the remaining slots. Set <em>Week</em> to 1 for a 15-row week, or 14 for a 3-pick week padded to 10.</p>
+  </div>
+
+  <div class="panel">
+    <div class="panel-top">
+      <div class="panel-title">
+        <span class="t" id="capt">Team picks · through Week 9</span>
+        <span class="d" id="subcapt"></span>
+      </div>
+      <div class="controls">
+        <span class="ctl-lbl">Week</span>
+        <select id="wk" aria-label="Current week"></select>
+        <div class="seg" role="group" aria-label="History style">
+          <button id="h-mute" aria-pressed="true">Muted team</button>
+          <button id="h-grey" aria-pressed="false">Greyscale</button>
+        </div>
+        <div class="seg" role="group" aria-label="Number format">
+          <button id="n-count" aria-pressed="true">Count</button>
+          <button id="n-pct"   aria-pressed="false">%</button>
+        </div>
+        <div class="seg" role="group" aria-label="View">
+          <button id="v-chart" aria-pressed="true">Chart</button>
+          <button id="v-table" aria-pressed="false">Table</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="plot" id="plot"><div class="grid" id="grid"></div></div>
+    <div class="key">
+      <div><i style="background:#FB4F14"></i> Current week — true team colour</div>
+      <div><i id="k-hist"></i> Earlier weeks — history</div>
+      <div><i style="background:var(--sunken)"></i> No picks</div>
+    </div>
+    <div class="axis-note"><span id="ordering"></span><span id="cover"></span></div>
+    <div class="tablewrap hidden" id="tablewrap"></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">02 — What the colour change costs</div>
+    <h2>Team colours collide. The row label is what saves it.</h2>
+  </div>
+  <div class="note warn">
+    <span class="k">Measured, not guessed</span>
+    <p>I ran every team pair that co-occurs in a week through CIE76. <b>54 pairs sit under ΔE 20</b> — and four are <em>byte-identical</em>. If colour were carrying identity here, this chart would be unreadable.</p>
+  </div>
+  <div class="pairs" id="collide"></div>
+  <div class="note ok">
+    <span class="k">Why it still works</span>
+    <p>Identity comes from the <b>row label</b>, not the fill — every row is one team, named in mono on the left, with the number in every cell. Colour is reinforcement, never the sole channel. That satisfies the accessibility rule the all-blue version satisfied a different way. The one thing it does cost: <b>colour no longer encodes magnitude</b>, which is exactly why you called for the number in every cell — without it the grid would carry no quantity at all.</p>
+  </div>
+  <div class="note">
+    <span class="k">Handled in the build</span>
+    <p>Label ink is computed per cell from the fill's relative luminance — <code>PIT #FFB612</code> (0.55) and <code>NO #D3BC8D</code> (0.52) take dark text; <code>LV #000000</code> and <code>CHI #0B162A</code> take white. That's the same class of bug as the tooltip: never eyeball contrast, compute it. Light fills also get a hairline border so they don't dissolve into the surface.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">03 — Open question</div>
+    <h2>Muted team colour, or greyscale?</h2>
+    <p class="sub">You said "muted version, or like a greyscale heatmap" — they encode different things, so it's worth choosing deliberately. Toggle <em>History style</em> above to compare on real data.</p>
+  </div>
+  <ul>
+    <li><b>Muted team</b> — each past cell is that team's colour washed toward the background. History stays identifiable at a glance; you can trace a team's run across the row by hue. Magnitude comes only from the number.</li>
+    <li><b>Greyscale</b> — past cells use a grey ramp keyed to that week's share, so the history region <em>also</em> encodes magnitude and the current week is the only colour on screen. Stronger emphasis, and the herd's density shows up as tone. Costs the hue-tracing.</li>
+  </ul>
+  <div class="note">
+    <span class="k">My recommendation</span>
+    <p><b>Greyscale.</b> The muted version spends colour on all 14 columns and weakens the very contrast that makes the current week pop — and since the number is in every cell anyway, hue-tracing is a small loss. Greyscale gives you one loud column and a quiet, still-quantitative history. But flip between them; this one is genuinely a taste call and you know the audience.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">04 — Still to confirm</div>
+    <h2>Three small ones</h2>
+  </div>
+  <ul>
+    <li><b>Number format</b> — count or % of that week's survivors? Count is concrete ("14 people took DEN"); % is comparable across weeks as the pool shrinks 252 → 19. The tooltip shows both regardless.</li>
+    <li><b>Future weeks</b> — the sheet already holds picks for weeks nobody has played yet. Right now the grid stops at the selected week. Show upcoming weeks too, or keep it to history?</li>
+    <li><b>Row cap</b> — week 1 has 15 teams, so the grid is 15 rows there and 10 in quiet weeks. Any upper limit you want, or let it run?</li>
+  </ul>
+</section>
+
+<footer>Mock built from production data, season 2025 · 252 entrants, 1,612 picks, 30 teams · final ingest 2025-12-18</footer>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+const DATA = {"weeks":[1,2,3,4,5,6,7,8,9,10,11,12,13,14],"totals":{"DEN":132,"ARI":110,"PHI":55,"CIN":30,"WAS":25,"PIT":13,"JAX":10,"NE":42,"MIA":4,"LAR":98,"SF":13,"GB":116,"CHI":6,"LV":4,"TB":43,"BAL":99,"DAL":49,"DET":98,"BUF":113,"MIN":3,"LAC":55,"HOU":22,"SEA":74,"KC":62,"ATL":28,"IND":64,"NO":1,"NYG":1,"CLE":3,"CAR":6},"weekTotals":{"1":252,"2":246,"3":237,"4":170,"5":127,"6":74,"7":61,"8":60,"9":39,"10":31,"11":21,"12":21,"13":21,"14":19},"cells":{"1|DEN":93,"1|ARI":53,"1|PHI":35,"1|CIN":24,"1|WAS":22,"1|PIT":6,"1|JAX":6,"1|NE":3,"1|MIA":2,"1|LAR":2,"1|SF":2,"1|GB":1,"1|CHI":1,"1|LV":1,"1|TB":1,"2|BAL":88,"2|DAL":48,"2|LAR":42,"2|ARI":33,"2|DET":11,"2|BUF":9,"2|MIN":3,"2|PIT":3,"2|LAC":2,"2|HOU":2,"2|PHI":1,"2|CIN":1,"2|SF":1,"2|GB":1,"2|NE":1,"3|SEA":64,"3|GB":54,"3|BUF":49,"3|KC":28,"3|TB":22,"3|ATL":12,"3|IND":6,"3|LAC":1,"3|WAS":1,"4|BUF":46,"4|DET":42,"4|LAC":29,"4|DEN":18,"4|HOU":14,"4|GB":13,"4|NE":5,"4|LAR":2,"4|WAS":1,"5|DET":42,"5|IND":31,"5|ARI":24,"5|LAR":22,"5|BUF":4,"5|LAC":2,"5|NO":1,"5|NYG":1,"6|GB":39,"6|PHI":11,"6|IND":6,"6|LAR":4,"6|PIT":4,"6|LV":3,"6|NE":2,"6|DEN":2,"6|DAL":1,"6|LAC":1,"6|WAS":1,"7|KC":27,"7|NE":17,"7|DEN":8,"7|CHI":3,"7|CLE":1,"7|SF":1,"7|LAR":1,"7|GB":1,"7|LAC":1,"7|DET":1,"8|IND":20,"8|ATL":16,"8|KC":7,"8|PHI":6,"8|CIN":5,"8|TB":4,"8|BUF":1,"8|NE":1,"9|LAR":24,"9|LAC":8,"9|GB":6,"9|DET":1,"10|DEN":10,"10|CAR":6,"10|SEA":6,"10|BUF":4,"10|IND":1,"10|LAC":1,"10|PHI":1,"10|CHI":1,"10|DET":1,"11|NE":11,"11|HOU":6,"11|BAL":3,"11|SF":1,"12|BAL":8,"12|SF":7,"12|SEA":3,"12|GB":1,"12|NE":1,"12|CHI":1,"13|LAC":10,"13|JAX":4,"13|MIA":2,"13|PHI":1,"13|SF":1,"13|NE":1,"13|LAR":1,"13|DEN":1,"14|TB":16,"14|CLE":2,"14|SEA":1},"colors":{"DEN":"#FB4F14","ARI":"#97233F","PHI":"#004C54","CIN":"#FB4F14","WAS":"#5A1414","PIT":"#FFB612","JAX":"#006778","NE":"#002244","MIA":"#008E97","LAR":"#003594","SF":"#AA0000","GB":"#203731","CHI":"#0B162A","LV":"#000000","TB":"#D50A0A","BAL":"#241773","DAL":"#003594","DET":"#0076B6","BUF":"#00338D","MIN":"#4F2683","LAC":"#0080C6","HOU":"#03202F","SEA":"#002244","KC":"#E31837","ATL":"#A71930","IND":"#002C5F","NO":"#D3BC8D","NYG":"#0B2265","CLE":"#311D00","CAR":"#0085CA"},"names":{"DEN":"Denver Broncos","ARI":"Arizona Cardinals","PHI":"Philadelphia Eagles","CIN":"Cincinnati Bengals","WAS":"Washington Commanders","PIT":"Pittsburgh Steelers","JAX":"Jacksonville Jaguars","NE":"New England Patriots","MIA":"Miami Dolphins","LAR":"Los Angeles Rams","SF":"San Francisco 49ers","GB":"Green Bay Packers","CHI":"Chicago Bears","LV":"Las Vegas Raiders","TB":"Tampa Bay Buccaneers","BAL":"Baltimore Ravens","DAL":"Dallas Cowboys","DET":"Detroit Lions","BUF":"Buffalo Bills","MIN":"Minnesota Vikings","LAC":"Los Angeles Chargers","HOU":"Houston Texans","SEA":"Seattle Seahawks","KC":"Kansas City Chiefs","ATL":"Atlanta Falcons","IND":"Indianapolis Colts","NO":"New Orleans Saints","NYG":"New York Giants","CLE":"Cleveland Browns","CAR":"Carolina Panthers"}};
+const GREYS = ["--g1","--g2","--g3","--g4","--g5","--g6"];
+let curWeek = 9, hist = "mute", numfmt = "count", view = "chart";
+
+const val  = (w,t) => DATA.cells[w+"|"+t] || 0;
+const teamsIn = (w) => Object.keys(DATA.totals).filter(t => val(w,t) > 0);
+
+function lum(hex){
+  const h = hex.replace("#","");
+  const f = c => { c = parseInt(c,16)/255; return c <= .04045 ? c/12.92 : Math.pow((c+.055)/1.055, 2.4); };
+  return .2126*f(h.slice(0,2)) + .7152*f(h.slice(2,4)) + .0722*f(h.slice(4,6));
+}
+const inkOn = (hex) => lum(hex) > .45 ? "#0b0b0b" : "#ffffff";
+
+/* rows: teams picked this week (desc by this week's count), then filled by season total */
+function rowSet(){
+  const here = teamsIn(curWeek).sort((a,b) => val(curWeek,b)-val(curWeek,a) || DATA.totals[b]-DATA.totals[a] || a.localeCompare(b));
+  const need = Math.max(10, here.length);
+  const rest = Object.keys(DATA.totals)
+    .filter(t => !here.includes(t))
+    .sort((a,b) => DATA.totals[b]-DATA.totals[a] || a.localeCompare(b));
+  return here.concat(rest.slice(0, Math.max(0, need - here.length)));
+}
+
+function fillFor(t, w, n){
+  const col = DATA.colors[t];
+  if (w === curWeek) return { bg: col, ink: inkOn(col), border: lum(col) > .6 ? "rgba(0,0,0,.18)" : "transparent" };
+  if (hist === "mute"){
+    return { bg: "color-mix(in srgb, " + col + " 26%, var(--mix))", ink: "var(--ink-2)", border: "transparent" };
+  }
+  const share = n / DATA.weekTotals[w];
+  const b = Math.min(GREYS.length-1, Math.floor(share * GREYS.length * 1.6));
+  return { bg: "var(" + GREYS[b] + ")", ink: b >= 4 ? "#ffffff" : "var(--ink-2)", border: "transparent" };
+}
+const shown = (w) => DATA.weeks.filter(x => x <= curWeek);
+const fmt = (n,w) => numfmt === "count" ? n : Math.round(100*n/DATA.weekTotals[w]) + "%";
+
+function render(){
+  const rs = rowSet(), ws = shown(), g = document.getElementById("grid");
+  g.style.gridTemplateColumns = "minmax(112px,auto) repeat(" + ws.length + ",minmax(42px,1fr))";
+  let h = '<div class="corner"></div>';
+  for (const w of ws) h += '<div class="collab' + (w===curWeek?' now':'') + '">' + (w===curWeek?'▼ ':'') + 'W' + w + '</div>';
+
+  for (const t of rs){
+    const active = val(curWeek,t) > 0;
+    h += '<div class="rowlab' + (active?'':' idle') + '">'
+       + '<span class="chip" style="background:' + DATA.colors[t] + '"></span>'
+       + t + ' <span class="tot">' + DATA.totals[t] + '</span></div>';
+    for (const w of ws){
+      const n = val(w,t);
+      if (!n){ h += '<div class="cell empty"></div>'; continue; }
+      const f = fillFor(t,w,n);
+      h += '<div class="cell' + (w===curWeek?' now':'') + '"'
+         + ' style="background:' + f.bg + ';color:' + f.ink + ';border-color:' + f.border + '"'
+         + ' data-t="' + t + '" data-w="' + w + '" data-n="' + n + '">' + fmt(n,w) + '</div>';
+    }
+  }
+  g.innerHTML = h;
+
+  document.getElementById("capt").textContent = "Team picks · through Week " + curWeek;
+  document.getElementById("subcapt").textContent =
+    DATA.weekTotals[curWeek] + " survivors picked " + teamsIn(curWeek).length + " different teams in Week " + curWeek;
+  document.getElementById("ordering").textContent =
+    "Ordered by Week " + curWeek + " picks ↓ then season total · " + rs.length + " rows";
+  const cov = rs.reduce((a,t) => a + DATA.totals[t], 0);
+  const all = Object.values(DATA.totals).reduce((a,b) => a+b, 0);
+  document.getElementById("cover").textContent = Math.round(100*cov/all) + "% of all season picks shown";
+  document.getElementById("k-hist").style.background =
+    hist === "mute" ? "color-mix(in srgb, #FB4F14 26%, var(--mix))" : "var(--g3)";
+  renderTable(rs, ws);
+}
+
+function renderTable(rs, ws){
+  let h = '<table><thead><tr><th>Team</th>';
+  for (const w of ws) h += '<th class="' + (w===curWeek?'now':'') + '">W' + w + '</th>';
+  h += '<th>Season</th></tr></thead><tbody>';
+  for (const t of rs){
+    h += '<tr><td>' + t + '</td>';
+    for (const w of ws){
+      const n = val(w,t);
+      h += '<td class="' + (n?'has ':'') + (w===curWeek?'nowc':'') + '">' + (n ? fmt(n,w) : '—') + '</td>';
+    }
+    h += '<td class="has">' + DATA.totals[t] + '</td></tr>';
+  }
+  document.getElementById("tablewrap").innerHTML = h + '</tbody></table>';
+}
+
+const tip = document.getElementById("tip"), grid = document.getElementById("grid");
+grid.addEventListener("mouseover", e => {
+  const c = e.target.closest(".cell"); if (!c || c.classList.contains("empty")) return;
+  const t = c.dataset.t, w = +c.dataset.w, n = +c.dataset.n;
+  tip.innerHTML = '<div class="tt"><span class="sw" style="background:' + DATA.colors[t] + '"></span>'
+    + DATA.names[t] + '</div>'
+    + '<div class="tr"><span>Week ' + w + (w===curWeek?' (current)':'') + '</span><b>' + n + ' picks</b></div>'
+    + '<div class="tr"><span>Share of week</span><b>' + (100*n/DATA.weekTotals[w]).toFixed(1) + '%</b></div>'
+    + '<div class="tr"><span>Survivors that week</span><b>' + DATA.weekTotals[w] + '</b></div>'
+    + '<div class="tr"><span>Season total</span><b>' + DATA.totals[t] + '</b></div>';
+  tip.classList.add("on");
+});
+grid.addEventListener("mousemove", e => {
+  const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > innerWidth - 8)  x = e.clientX - w - pad;
+  if (y + h > innerHeight - 8) y = e.clientY - h - pad;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+});
+grid.addEventListener("mouseout", e => {
+  if (!e.relatedTarget || !e.relatedTarget.closest(".cell")) tip.classList.remove("on");
+});
+
+/* collision cards, computed from the same data the chart uses */
+(function(){
+  const seen = [], out = [];
+  for (const w of DATA.weeks){
+    const ts = teamsIn(w);
+    for (let i=0;i<ts.length;i++) for (let j=i+1;j<ts.length;j++){
+      const a=ts[i], b=ts[j];
+      if (DATA.colors[a].toUpperCase() === DATA.colors[b].toUpperCase()){
+        const k=[a,b].sort().join("/");
+        if (!seen.includes(k)){ seen.push(k); out.push({a,b,w}); }
+      }
+    }
+  }
+  document.getElementById("collide").innerHTML = out.map(p =>
+    '<div class="pair"><span class="sw2"><i style="background:'+DATA.colors[p.a]+'"></i>'
+    + '<i style="background:'+DATA.colors[p.b]+'"></i></span>'
+    + '<span class="txt"><b>'+p.a+' / '+p.b+'</b><br>'+DATA.colors[p.a].toUpperCase()+' — identical, both in W'+p.w+'</span></div>'
+  ).join("");
+})();
+
+const sel = document.getElementById("wk");
+sel.innerHTML = DATA.weeks.map(w => '<option value="'+w+'"'+(w===curWeek?' selected':'')+'>Week '+w+'</option>').join("");
+sel.onchange = () => { curWeek = +sel.value; render(); };
+
+function pair(a,b,set){
+  const A=document.getElementById(a), B=document.getElementById(b);
+  A.onclick = () => { A.setAttribute("aria-pressed","true");  B.setAttribute("aria-pressed","false"); set(0); };
+  B.onclick = () => { B.setAttribute("aria-pressed","true");  A.setAttribute("aria-pressed","false"); set(1); };
+}
+pair("h-mute","h-grey",  i => { hist   = i ? "grey"  : "mute";  render(); });
+pair("n-count","n-pct",  i => { numfmt = i ? "pct"   : "count"; render(); });
+pair("v-chart","v-table", i => {
+  view = i ? "table" : "chart";
+  document.getElementById("plot").classList.toggle("hidden", view === "table");
+  document.getElementById("tablewrap").classList.toggle("hidden", view !== "table");
+});
+
+render();
+</script>

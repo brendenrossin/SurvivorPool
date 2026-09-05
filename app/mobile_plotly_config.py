@@ -1,163 +1,103 @@
 """
-Mobile-Optimized Plotly Configuration
-Focus on touch interactions only, remove heavy features
+Shared Plotly configuration.
+
+Every layout value resolves through app.theme, so a surface change reaches
+every chart routed through render_mobile_chart.
+
+The picks grid deliberately does NOT route through here - it calls
+st.plotly_chart directly, because CHART_CONFIGS would clobber its computed
+height and its axis config. It therefore needs its own theming pass, which
+belongs to whoever owns that module.
 """
 
-# Mobile-optimized Plotly configuration
+import copy
+
+from app.theme import BORDER, FONT_STACK, INK, INK_MUTED, SURFACE_RAISED
+
+# Touch interactions only. Shared with the picks grid, which takes this config
+# even though it skips the layout defaults above it.
 MOBILE_CONFIG = {
-    # Remove all toolbar buttons except zoom/pan
-    'displayModeBar': False,  # Hide toolbar completely for cleaner mobile UI
+    'displayModeBar': False,
     'displaylogo': False,
-    'modeBarButtonsToRemove': [
-        'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d',
-        'autoScale2d', 'resetScale2d', 'hoverClosestCartesian',
-        'hoverCompareCartesian', 'zoom2d', 'toggleSpikelines',
-        'toImage', 'sendDataToCloud'
-    ],
-    'doubleClick': 'reset',  # Double tap to reset view
-    'scrollZoom': False,  # Disable scroll zoom to prevent conflicts with page scroll
-    'responsive': True,  # Auto-resize for mobile
-    'staticPlot': False,  # Keep touch interactions
+    'doubleClick': False,  # nothing to reset - the axes are locked
+    'scrollZoom': False,   # would fight page scroll on a phone
+    'responsive': True,
+    'staticPlot': False,   # keep hover; zoom is disabled at the axes instead
 }
 
-# Mobile-optimized layout defaults
+_AXIS = {
+    'fixedrange': True,
+    'tickfont': {'size': 11, 'color': INK_MUTED},
+    'title': {'font': {'size': 11, 'color': INK_MUTED}},
+    'gridcolor': BORDER,
+    'linecolor': BORDER,
+    'zerolinecolor': BORDER,
+}
+
 MOBILE_LAYOUT_DEFAULTS = {
-    'template': 'plotly_white',  # Modern light template
-    'margin': {'l': 20, 'r': 20, 't': 40, 'b': 40},  # Minimal margins for mobile
-    'font': {'family': 'Inter, system-ui', 'size': 12, 'color': '#0F172A'},  # Modern font matching CSS with dark color
-    'showlegend': False,  # Legends take up too much space on mobile
-    'hovermode': 'closest',  # Better touch targeting
-    'dragmode': False,  # Disable drag to prevent scroll conflicts
-    'paper_bgcolor': 'rgba(0,0,0,0)',  # Transparent background
+    'margin': {'l': 8, 'r': 8, 't': 8, 'b': 28},
+    'font': {'family': FONT_STACK, 'size': 12, 'color': INK},
+    'showlegend': False,
+    'hovermode': 'closest',
+    'dragmode': False,
+    'paper_bgcolor': 'rgba(0,0,0,0)',
     'plot_bgcolor': 'rgba(0,0,0,0)',
 }
 
-# Chart-specific mobile configurations
 CHART_CONFIGS = {
-    'donut': {
-        **MOBILE_LAYOUT_DEFAULTS,
-        'height': 250,  # Compact for mobile
-        'showlegend': False,  # Remove redundant legend - annotations show the data
-    },
-
-    'bar_chart': {
-        **MOBILE_LAYOUT_DEFAULTS,
-        'height': 300,
-        'xaxis': {
-            'tickfont': {'size': 10, 'color': '#0F172A'},
-            'title': {'font': {'size': 11, 'color': '#0F172A'}},
-            'gridcolor': 'rgba(148,163,184,.25)'
-        },
-        'yaxis': {
-            'tickfont': {'size': 10, 'color': '#0F172A'},
-            'title': {'font': {'size': 11, 'color': '#0F172A'}},
-            'gridcolor': 'rgba(148,163,184,.25)'
-        }
-    },
-
-    'line_chart': {
-        **MOBILE_LAYOUT_DEFAULTS,
-        'height': 300,
-        'xaxis': {
-            'tickfont': {'size': 10, 'color': '#0F172A'},
-            'title': {'font': {'size': 11, 'color': '#0F172A'}}
-        },
-        'yaxis': {
-            'tickfont': {'size': 10, 'color': '#0F172A'},
-            'title': {'font': {'size': 11, 'color': '#0F172A'}}
-        }
-    },
-
-    'gauge': {
-        **MOBILE_LAYOUT_DEFAULTS,
-        'height': 250,  # Compact gauge
-        'margin': {'l': 10, 'r': 10, 't': 30, 'b': 10},
-    },
-
-    'heatmap': {
-        **MOBILE_LAYOUT_DEFAULTS,
-        'height': 250,  # Compact heatmap
-        'xaxis': {
-            'tickfont': {'size': 9, 'color': '#0F172A'},
-            'title': {'font': {'size': 10, 'color': '#0F172A'}}
-        },
-        'yaxis': {
-            'tickfont': {'size': 9, 'color': '#0F172A'},
-            'title': {'font': {'size': 10, 'color': '#0F172A'}}
-        }
-    }
+    'bar_chart': {**MOBILE_LAYOUT_DEFAULTS, 'xaxis': _AXIS, 'yaxis': _AXIS},
+    'line_chart': {**MOBILE_LAYOUT_DEFAULTS, 'xaxis': _AXIS, 'yaxis': _AXIS},
 }
 
-def get_mobile_config():
-    """Get mobile-optimized Plotly config"""
-    return MOBILE_CONFIG
 
-def get_mobile_layout(chart_type='default'):
-    """Get mobile-optimized layout for specific chart type"""
-    return CHART_CONFIGS.get(chart_type, MOBILE_LAYOUT_DEFAULTS).copy()
+def lock_zoom(fig):
+    """Disable pan and zoom while keeping hover.
 
-def apply_mobile_optimization(fig, chart_type='default'):
-    """Apply mobile optimizations to a Plotly figure"""
-    layout = get_mobile_layout(chart_type)
-    fig.update_layout(**layout)
-
-    # Additional mobile optimizations (skip hover for gauge/indicator charts)
-    if chart_type != 'gauge':
-        fig.update_traces(
-            # Increase hover target area for better touch interaction
-            hoverlabel=dict(
-                bgcolor="white",
-                bordercolor="black",
-                font_size=12
-            )
-        )
-
+    A drag on a touch screen zooms by default and there is no visible way back
+    out - the mode bar that carries the reset is hidden, and double-click reset
+    is not discoverable. None of these charts have detail that rewards zooming,
+    so the axes are pinned instead. staticPlot would also do it, but at the
+    cost of the tooltips.
+    """
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     return fig
 
+
+def get_mobile_config():
+    """Plotly interaction config, shared by every chart including the grid."""
+    return MOBILE_CONFIG
+
+
+def get_mobile_layout(chart_type='default'):
+    """Layout defaults for a chart type.
+
+    A deep copy: the axis dicts are shared between chart types, so a shallow
+    copy would let one caller's mutation of layout["xaxis"] leak into every
+    later chart in the process.
+    """
+    return copy.deepcopy(CHART_CONFIGS.get(chart_type, MOBILE_LAYOUT_DEFAULTS))
+
+
+def apply_mobile_optimization(fig, chart_type='default'):
+    """Apply the shared layout and a legible tooltip."""
+    fig.update_layout(**get_mobile_layout(chart_type))
+    lock_zoom(fig)
+    fig.update_traces(
+        hoverlabel=dict(
+            bgcolor=SURFACE_RAISED,
+            bordercolor=BORDER,
+            # Explicit ink. Without it Plotly keeps the auto-contrast colour it
+            # computed from the trace fill, which once rendered white on white.
+            font=dict(color=INK, size=12, family=FONT_STACK),
+        )
+    )
+    return fig
+
+
 def render_mobile_chart(fig, chart_type='default'):
-    """Render a Plotly chart with mobile optimizations"""
+    """Render a figure with the shared layout and interaction config."""
     import streamlit as st
 
-    # Apply mobile optimizations
     fig = apply_mobile_optimization(fig, chart_type)
-
-    # Render with mobile config
-    st.plotly_chart(
-        fig,
-        use_container_width=True,
-        config=get_mobile_config()
-    )
-
-# Touch-friendly annotation helpers
-def create_touch_annotation(x, y, text, chart_type='bar_chart'):
-    """Create touch-friendly annotations for mobile"""
-    base_size = 10 if chart_type == 'bar_chart' else 9
-
-    return dict(
-        x=x,
-        y=y,
-        text=text,
-        showarrow=False,
-        font=dict(size=base_size, color="black"),
-        bgcolor="rgba(255,255,255,0.8)",
-        bordercolor="black",
-        borderwidth=1,
-        borderpad=2
-    )
-
-# Color schemes optimized for mobile (high contrast)
-MOBILE_COLORS = {
-    'primary': '#1f77b4',
-    'secondary': '#ff7f0e',
-    'success': '#2ca02c',
-    'danger': '#d62728',
-    'warning': '#ff7f0e',
-    'info': '#17a2b8',
-    'eliminated': '#d62728',
-    'remaining': '#2ca02c',
-    'neutral': '#7f7f7f'
-}
-
-def get_mobile_color_scheme():
-    """Get high-contrast color scheme for mobile"""
-    return MOBILE_COLORS
+    st.plotly_chart(fig, use_container_width=True, config=get_mobile_config())

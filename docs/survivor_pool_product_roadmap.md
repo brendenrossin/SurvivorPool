@@ -38,7 +38,7 @@ These features highlight your engineering skills but don’t undermine product v
 
 Reserve these differentiators for the **private repo** you will monetize:
 
-- 🚀 **Multi-league support** (multiple pools on one dashboard).  
+- 🚀 **Multi-league support** (multiple pools on different dashboards).  
 - 🚀 **Authentication & roles** (commissioner dashboard, player login).  
 - 🚀 **Automated jobs** (cron-based ingestion, scoring, notifications).  
 - 🚀 **Premium visuals** (Chaos Meter, Team of Doom, Graveyard board, upset tracker 🐕).  
@@ -77,36 +77,261 @@ Example:
 
 4. **Pricing Experiment**  
    - Options:  
-     - $10–20 **per league per season**, or  
-     - $2–5 **per player buy-in**.  
+     - Free for first 5 leagues for first season,  
+     - If bring your own google sheet:  
+        - $25 per league if under 1000 players  
+        - $100 per league if over 1000 players  
+     - If pick-tracking in app:  
+        - $20 **per league per season** for next 5 leagues,   
+        - Regular pricing: $2–5 **per player buy-in**, max $100 per league (if under 1000 players), max $250 (if over 1000 players).  
+
+Given what others charge, your lean architecture, and your competitive advantages, here’s a realistic pricing offer for launch:
+	•	Free tier: up to 25 entries (or limited feature set) to let small friend/family pools try it.
+	•	Standard tier: $29 for up to 150 entries (most small pools).
+	•	Pro tier: $59 for up to 500 entries, with advanced analytics, branding, notifications.
+	•	Enterprise / custom: for >500 entries or multiple pool packages, custom pricing.
+
+You can also test per-entry pricing (e.g. $0.25 each) or a “pool + host seat” add-on.
 
 ---
 
-## 6. Development Roadmap
+## 6. Competitive Landscape & Pricing Insights
 
-### Phase 1 – Public Showcase (2 weeks)
-- [ ] Refactor code to support **single league only**.  
-- [ ] Remove multi-league or “extra” features.  
-- [ ] Add documentation for setup.  
-- [ ] Apply AGPL license.  
-- [ ] Deploy demo on Streamlit Cloud.  
+Several competitor apps exist in the survivor pool space, each offering different features and pricing models:
 
-### Phase 2 – Private Product (4–6 weeks)
-- [ ] Add **multi-league support** (DB schema + tenant handling).  
-- [ ] Add **user accounts** (commissioner + player).  
-- [ ] Build premium visuals + commissioner tools.  
-- [ ] Package SaaS deployment (Dockerfile + Railway/Fly.io).  
-- [ ] Integrate **Stripe for payments**.  
+- **My Survivor Pool**: Offers multi-league support, email reminders, and flexible rules. Pricing typically involves a flat fee per pool, around $25–50. Features include chat and some analytics not currently in this app.
 
-### Phase 3 – Market Test (ongoing)
-- [ ] Post to Reddit to gauge interest.  
-- [ ] Launch landing page + email list.  
-- [ ] Invite beta testers.  
-- [ ] Refine pricing model.  
+- **Simply SportsWare**: Provides extensive commissioner tools, player management, and social features such as chat and message boards. Pricing is generally subscription-based with tiered plans.
+
+- **Office Pool Stop**: Known for broad office pool management, including survivor pools. Features include email reminders, custom rules, and integration with other pool types. Pricing often uses a rake model or per-entry fees.
+
+- **Survivor Sweat**: Focuses on live scoring and social features like trash talk boards. Pricing is usually per entry ($0.25–0.75) with rake on winnings.
+
+- **RunYourPool**: Offers a full suite of fantasy and survivor pool features including mobile apps, email alerts, and chat. Pricing includes freemium tiers with paid upgrades for premium features.
+
+**This app’s differentiators** include simplicity, transparent pricing, live dashboards with real-time updates, and a leaner feature set that reduces friction and complexity. It avoids heavy social features and rake fees, appealing to users who prefer straightforward, low-cost solutions.
+
+### Pricing Insights Table
+
+| Pricing Model       | Typical Range        | Notes                                  |
+|---------------------|----------------------|----------------------------------------|
+| Flat per pool       | $25 – $100           | One-time or seasonal fee per league    |
+| Per entry          | $0.25 – $0.75        | Charged per player entry                |
+| Freemium tiered     | Free + paid upgrades | Basic free tier with paid premium features |
+| Rake model          | % of pot or winnings | Common in betting-related pools        |
+
+While many existing apps offer extras like email reminders, chat, and flexible rules, this app focuses on a leaner, more transparent, and lower-friction option that emphasizes ease of use and live data visualization.
 
 ---
 
-## 7. Long-Term Expansion Ideas
+## 7. Discord Integration for Notifications & Messaging
+
+Discord offers a compelling alternative to traditional SMS or email notifications for survivor pool communication. It provides a lower-friction way to send pick reminders, elimination alerts, and commissioner messages.
+
+Discord bots can programmatically post messages to league-level channels for group notifications and can also send direct messages (DMs) to individual users if permissions allow. This enables both broad announcements and personalized communication without relying on SMS gateways or email providers.
+
+An MVP Discord integration could include:
+
+1. **League-level channel bot posts**: Automated reminders such as “Reminder: submit Week 4 picks” posted to a dedicated league channel.
+
+2. **Optional direct messages for players**: Personalized alerts or confirmations sent as DMs.
+
+3. **Webhook integration with Streamlit jobs**: Connect backend jobs to Discord via webhooks or bot APIs to trigger messages based on game events or deadlines.
+
+Implementation can be simplified using libraries like `discord.py` or direct webhook calls. However, limitations include requiring users to join the Discord server and to allow DMs from the bot, which may require onboarding steps.
+
+---
+
+## 8. Development Roadmap
+
+### ✅ Phase 1 – Backend Infrastructure (COMPLETE)
+- [x] **Multi-league database schema** (leagues, users, user_players, league_commissioners tables)
+- [x] **Database migration system** (idempotent SQL migration + Python script)
+- [x] **Updated SQLAlchemy models** (League, User, UserPlayer, LeagueCommissioner)
+- [x] **Added league_id to existing tables** (players, picks)
+- [x] **Railway dev environment setup** (web-dev + postgres-dev services)
+- [x] **Migration deployed to dev** (League 1 created automatically)
+
+### ✅ Phase 2 – Query Layer & Backward Compatibility (COMPLETE)
+- [x] **Created DEFAULT_LEAGUE_ID constant** (backward compatibility with existing single-league)
+- [x] **Updated all database queries** to filter by league_id:
+  - [x] Dashboard data functions (summary, meme stats, player search)
+  - [x] Live scores widget
+  - [x] Main app queries
+  - [x] Score update jobs (ScoreUpdater class)
+  - [x] Sheets ingestion job
+- [x] **Tested backward compatibility** (all queries work with multi-league schema)
+- [x] **Auto-deploy to Railway dev** (feature/multi-league branch)
+
+### ✅ Phase 3 – URL-Based League Routing (COMPLETE)
+- [x] **URL routing implementation**:
+  - [x] Each league accessible via query param (?league=slug)
+  - [x] Auto-redirect to first league if no param specified
+  - [x] Error handling for invalid league slugs
+  - [x] `get_league_by_slug()` function for URL lookups
+- [x] **League switcher sidebar**:
+  - [x] Shows current league name and slug
+  - [x] Links to other available leagues
+  - [x] Shareable link box for each league
+- [x] **Header updates**:
+  - [x] League name in main title
+  - [x] League slug in subtitle
+- [x] **Tested with 2 leagues**:
+  - [x] League 1: Rossin Family (0 players)
+  - [x] League 2: Test League Alpha (5 players)
+
+### 🚧 Dashboard & Platform (IN FLIGHT)
+
+Runs alongside the multi-league phases — this is the single-league dashboard
+that is live in production today, not the SaaS build-out.
+
+- [x] **Weekly picks grid** — replaced the 30-colour stacked bar with a team x
+      week grid that leads with the current week.
+      Spec: `docs/design/picks-grid-spec.md`.
+- [ ] **Upgrade Streamlit** (`1.28.2` → `>=1.35`) — *next up*.
+      Unlocks `st.plotly_chart(on_select=...)`, native chart click events, and
+      `st.fragment` partial reruns (1.33+), which is also the clean fix for the
+      whole page re-querying on every widget interaction. Large version jump on
+      an app that deploys straight to production, so it wants its own staging
+      soak before merge. Blocks the item below.
+- [ ] **Click a grid cell to see who picked that team** — depends on the
+      Streamlit upgrade. The grid already draws an invisible scatter trace at
+      every cell centre for hover; attaching `customdata=[(week, team)]` makes
+      it the click target. Needs a cached `get_pickers(season, week, team)` in
+      `dashboard_data.py` and a side panel — `st.columns([3, 1])` with
+      `st.dataframe(height=fig.layout.height)` so it matches the grid. Must
+      clamp to the current week: revealing *who* picked an unplayed week is a
+      worse leak than the count.
+- [x] **UI overhaul of the remaining widgets** — done in #30. `graveyard.py`,
+      `team_of_doom.py`, `survivors.py` and `chaos_meter.py` are pure view code
+      now; every read goes through a cached function in `dashboard_data.py`.
+      The survivors N+1 went from `2N + 2` round trips to one and the
+      elimination tracker from 42 to one. The donut and the gauge are gone.
+- [x] **Live scores roll forward once a week finishes.** Shipped in #29, but
+      *not* in the shape this line described: the roll is driven by whether
+      every game in the week is final, not by the weekday. The rule it replaced
+      added a week every Tuesday after 04:00 UTC whether or not anything had
+      been played, on top of a base week of `max(Game.week)` — week 16 in 2025,
+      a week nobody played, because the NFL schedule outruns the pool. See
+      `resolve_scoreboard_week` and `should_reveal_picks` in
+      `app/live_scores.py`.
+      **Correction:** those notes said "only if a team from that game has been
+      picked", and as written that leaks. Filtering an unplayed week's slate to
+      picked teams publishes the field's next-week picks days before kickoff —
+      by omission rather than by a number, but it is the same disclosure
+      `aggregate_picks()` exists to prevent. Shipping shape: a week that has not
+      kicked off shows the **full slate, no pick counts, no filtering**, and
+      snaps to picked-teams-only with counts once it starts. The grid's
+      `resolve_current_week` stays pointed at the last week that kicked off and
+      is deliberately *not* unified with the scoreboard's notion of current.
+- [x] **Every empty state has its own message.** Each plot, card and table now
+      names the precondition it is waiting on rather than rendering blank or a
+      generic line. Live scores in #29 (three states: no schedule, no picked
+      team playing, not yet kicked off); the four Pool Insights widgets, both
+      meme panels and the KPI sparkline in #30. The last generic line —
+      "No picks data to display" in `render_weekly_picks_chart` — went with
+      #30. This matters most right now because 2026 is nearly empty, so most of
+      these panels are what production actually shows.
+      Errors are deliberately *not* empty states: a failure logs and says
+      "unavailable right now", so "nothing to show yet" and "this broke" do not
+      read the same.
+- [ ] **Work through the picks-grid review backlog** —
+      `docs/optimizations/picks-grid-backlog.md`.
+
+### 🚧 Phase 4 – League Creation & Management (TODO)
+- [ ] **League creation page**:
+  - [ ] Form to create new league (name, slug, pick source, season)
+  - [ ] Auto-generate unique invite code
+  - [ ] Validate league slug uniqueness
+  - [ ] Insert into database and redirect to new league URL
+- [ ] **Commissioner dashboard**:
+  - [ ] View/edit league settings
+  - [ ] Display and regenerate invite code
+  - [ ] Manage players (add, remove, view)
+  - [ ] League stats overview
+  - [ ] Export league data
+- [ ] **League discovery**:
+  - [ ] Public league list page (optional)
+  - [ ] Search leagues by name/slug
+  - [ ] Join league via invite code
+
+### 📋 Phase 5 – In-App Pick Submission (TODO)
+- [ ] **User authentication**:
+  - [ ] Login/signup flow
+  - [ ] Password hashing (bcrypt)
+  - [ ] Session management
+  - [ ] Magic link login (passwordless option)
+- [ ] **Pick submission**:
+  - [ ] Weekly pick form
+  - [ ] Team validation (no repeats, check previously used teams)
+  - [ ] Game lock enforcement (can't pick after kickoff)
+  - [ ] Pick confirmation/edit flow
+- [ ] **Player onboarding**:
+  - [ ] Join league via invite code
+  - [ ] Link user to player profile
+  - [ ] Commissioner can manually add players
+
+### 📋 Phase 6 – Premium Features & SaaS Differentiation (TODO)
+- [ ] **Custom branding**:
+  - [ ] League logo upload
+  - [ ] Custom color themes
+  - [ ] White-label options
+- [ ] **Advanced analytics**:
+  - [ ] Expected value (EV) calculator for picks
+  - [ ] Crowd wisdom insights (consensus vs outliers)
+  - [ ] Historical team performance
+  - [ ] Survivor odds calculator
+- [ ] **Social features**:
+  - [ ] League chat/banter board
+  - [ ] Trash talk comments
+  - [ ] Weekly power rankings
+- [ ] **Notifications**:
+  - [ ] Email pick reminders
+  - [ ] Elimination alerts
+  - [ ] Weekly recap emails
+- [ ] **Export tools**:
+  - [ ] PDF reports
+  - [ ] CSV exports
+  - [ ] Season summaries
+
+### 📋 Phase 7 – SaaS Infrastructure & Monetization (TODO)
+- [ ] **Payment integration**:
+  - [ ] Stripe setup
+  - [ ] Subscription tiers (Free, Pro, Premium)
+  - [ ] Payment flow
+- [ ] **Pricing implementation**:
+  - [ ] Free tier: 1 league, Google Sheets only
+  - [ ] Pro tier: $25-100/league (unlimited leagues, in-app picks)
+  - [ ] Premium tier: Custom branding, advanced analytics
+- [ ] **Landing page + marketing**:
+  - [ ] Product landing page
+  - [ ] Email collection for early access
+  - [ ] Feature comparison table
+  - [ ] Beta signup flow
+- [ ] **Beta testing program**:
+  - [ ] Recruit 5-10 commissioners
+  - [ ] Free first season for beta testers
+  - [ ] Feedback collection system
+
+### 📋 Phase 8 – Public Showcase Repo (TODO)
+- [ ] **Strip to single-league only** (fork current repo)
+- [ ] **Remove premium features** (keep basic dashboards only)
+- [ ] **Add comprehensive docs** (setup guide, architecture)
+- [ ] **Apply AGPL-3.0 license**
+- [ ] **Deploy public demo** (Streamlit Cloud or Railway free tier)
+- [ ] **Add attribution** (link to SaaS version in README)
+- [ ] **Post to Reddit** (r/fantasyfootball, r/nfl for validation)
+
+### 📋 Phase 9 – Market Test & Validation (TODO)
+- [ ] **Reddit validation post** (gauge interest, collect feedback)
+- [ ] **Launch beta waitlist** (collect emails)
+- [ ] **Invite first beta cohort** (5-10 commissioners)
+- [ ] **Iterate on feedback** (fix bugs, add requested features)
+- [ ] **Refine pricing model** (based on beta user willingness to pay)
+
+---
+
+## 9. Long-Term Expansion Ideas
 
 - 📱 **Mobile app** (React Native / Flutter).  
 - 🏆 **Fantasy-style features** (side bets, mini games).  
@@ -116,7 +341,7 @@ Example:
 
 ---
 
-## 8. Key Principles
+## 10. Key Principles
 
 - Showcase enough code to **land jobs & build credibility**.  
 - Keep monetizable differentiators **private**.  
