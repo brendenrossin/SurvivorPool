@@ -289,6 +289,8 @@ def build_picks_grid(
     as_percent: bool = False,
     background: str = "#ffffff",
     team_names: Optional[Dict[str, str]] = None,
+    team_status: Optional[Dict[str, str]] = None,
+    danger: str = DANGER,
 ) -> go.Figure:
     """Build the picks grid figure.
 
@@ -306,8 +308,14 @@ def build_picks_grid(
         as_percent: label cells with share of the week instead of raw count
         background: surface colour that earlier weeks blend toward
         team_names: {team: full name} for the tooltip
+        team_status: {team: 'won'|'lost'|'pending'} for `current_week`. A team
+            marked 'lost' takes the eliminated treatment, in the current week
+            only - history's job here is volume, not outcome. None renders
+            exactly as before.
+        danger: semantic danger hue for the eliminated border.
     """
     team_names = team_names or {}
+    team_status = team_status or {}
     fig = go.Figure()
 
     shapes, annotations = [], []
@@ -323,16 +331,26 @@ def build_picks_grid(
                 continue
 
             is_now = week == current_week
-            fill = base if is_now else muted
+            is_out = is_now and team_status.get(team) == "lost"
             total = week_totals.get(week, 0)
             share = (100 * n / total) if total else 0
+
+            if is_out:
+                fill = eliminated_fill(base, background)
+                edge, edge_width, ink = eliminated_edge(fill, danger), 2, label_ink(fill)
+            elif is_now:
+                fill = base
+                edge, edge_width, ink = cell_edge(fill, background), 1, label_ink(fill)
+            else:
+                fill = muted
+                edge, edge_width, ink = cell_edge(fill, background), 1, history_ink(fill)
 
             shapes.append(dict(
                 type="rect", xref="x", yref="y",
                 x0=col_idx - CELL_W / 2, x1=col_idx + CELL_W / 2,
                 y0=row_idx - CELL_H / 2, y1=row_idx + CELL_H / 2,
                 fillcolor=fill,
-                line=dict(width=1, color="rgba(0,0,0,.12)" if relative_luminance(fill) > 0.6 else fill),
+                line=dict(width=edge_width, color=edge),
                 layer="below",
             ))
 
@@ -342,16 +360,22 @@ def build_picks_grid(
                 showarrow=False,
                 font=dict(
                     size=12 if is_now else 11,
-                    color=label_ink(fill) if is_now else "#52514e",
+                    color=ink,
                     family="Inter, system-ui",
                 ),
             ))
 
             hx.append(col_idx)
             hy.append(row_idx)
+            if is_out:
+                state = f"<br><b>Eliminated</b> — {n} out"
+            elif is_now:
+                state = " (current)"
+            else:
+                state = ""
             hover.append(
                 f"<b>{team_names.get(team, team)}</b><br>"
-                f"Week {week}{' (current)' if is_now else ''}<br>"
+                f"Week {week}{state}<br>"
                 f"{n} of {total} picks — {share:.1f}%"
             )
 
@@ -385,9 +409,13 @@ def build_picks_grid(
         ),
         # Explicit ink - omitting font colour is what made the old tooltip
         # render near-white on white.
+        # Derived from the surface, not hardcoded light: omitting the font
+        # colour is what made the old tooltip render near-white on white, and
+        # hardcoding it merely moves that bug to the other theme.
         hoverlabel=dict(
-            bgcolor="#ffffff", bordercolor="#d3d6dc",
-            font=dict(color="#0b0b0b", size=12, family="Inter, system-ui"),
+            bgcolor=background,
+            bordercolor=mute_color(label_ink(background), background, 0.25),
+            font=dict(color=label_ink(background), size=12, family="Inter, system-ui"),
             align="left",
         ),
     )

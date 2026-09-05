@@ -375,3 +375,60 @@ class TestSurfaceDerivedInk:
         """Deliberately softer than full contrast - history should recede."""
         fill = mute_color("#D50A0A", LIGHT_SURFACE)
         assert contrast_ratio(history_ink(fill), fill) < contrast_ratio(label_ink(fill), fill)
+
+
+WK14_COUNTS = {(13, "TB"): 4, (14, "TB"): 16, (14, "CLE"): 2, (14, "SEA"): 1}
+WK14_TOTALS = {13: 4, 14: 19}
+WK14_COLORS = {"TB": "#D50A0A", "CLE": "#311D00", "SEA": "#002244"}
+WK14_STATUS = {"TB": "lost", "CLE": "lost", "SEA": "won"}
+
+
+def _grid(**kwargs):
+    params = dict(
+        weeks=[13, 14], rows=["TB", "CLE", "SEA"], counts=WK14_COUNTS,
+        week_totals=WK14_TOTALS, team_colors=WK14_COLORS, current_week=14,
+        background=LIGHT_SURFACE,
+    )
+    params.update(kwargs)
+    return build_picks_grid(**params)
+
+
+class TestEliminatedInFigure:
+    """2025 week 14: 16 entrants on Tampa Bay, TB lost, the pool ended at one."""
+
+    def test_omitting_team_status_changes_nothing(self):
+        """Every existing caller and test must render exactly as before."""
+        assert _grid().layout.shapes == _grid(team_status=None).layout.shapes
+
+    def test_a_lost_current_week_cell_takes_the_eliminated_fill(self):
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert eliminated_fill("#D50A0A", LIGHT_SURFACE) in fills
+
+    def test_a_won_current_week_cell_keeps_true_team_colour(self):
+        """Won and not-yet-kicked-off are deliberately identical."""
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert "#002244" in fills
+
+    def test_an_eliminated_teams_earlier_weeks_are_untouched(self):
+        """History's job is volume, not outcome."""
+        fills = [s["fillcolor"] for s in _grid(team_status=WK14_STATUS).layout.shapes]
+        assert mute_color("#D50A0A", LIGHT_SURFACE) in fills
+
+    def test_a_lost_cell_takes_the_danger_border(self):
+        shapes = _grid(team_status=WK14_STATUS).layout.shapes
+        fill = eliminated_fill("#D50A0A", LIGHT_SURFACE)
+        lost = [s for s in shapes if s["fillcolor"] == fill]
+        assert lost and lost[0]["line"]["width"] == 2
+        assert lost[0]["line"]["color"] == eliminated_edge(fill)
+
+    def test_a_pending_team_is_not_treated_as_lost(self):
+        status = {"TB": "pending", "CLE": "pending", "SEA": "pending"}
+        fills = [s["fillcolor"] for s in _grid(team_status=status).layout.shapes]
+        assert eliminated_fill("#D50A0A", LIGHT_SURFACE) not in fills
+
+    def test_a_status_for_a_team_not_in_the_grid_is_ignored(self):
+        _grid(team_status={"KC": "lost"})  # must not raise
+
+    def test_the_tooltip_names_the_elimination(self):
+        trace = _grid(team_status=WK14_STATUS).data[0]
+        assert any("Eliminated" in text for text in trace.hovertext)
