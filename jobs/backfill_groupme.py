@@ -61,12 +61,14 @@ def backfill(since: datetime, max_pages: int = MAX_PAGES) -> int:
 
             if len(batch) >= BATCH_SIZE:
                 inserted, updated = upsert_messages(db, batch)
+                db.commit()     # upsert_messages leaves the transaction to us
                 stored += inserted + updated
                 print(f"  ... {stored} messages")
                 batch = []
 
         if batch:
             inserted, updated = upsert_messages(db, batch)
+            db.commit()     # upsert_messages leaves the transaction to us
             stored += inserted + updated
 
         if walk.stopped_at_ceiling:

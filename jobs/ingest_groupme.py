@@ -70,6 +70,7 @@ def run(days: int = RESCAN_DAYS) -> tuple[int, int]:
                       f"may not have refreshed this run")
 
             inserted, updated = upsert_messages(db, batch)
+            db.commit()     # upsert_messages leaves the transaction to us
         except (GroupMeError, RuntimeError) as exc:
             # Both are ours and already safe: GroupMeError is redacted at its
             # raise site in api/groupme.py, RuntimeError is our own literal.
