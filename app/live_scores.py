@@ -11,10 +11,13 @@ Data comes from the database only. API calls happen in the cron jobs.
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+import html
+
 import pytz
 import streamlit as st
 
-from app.dashboard_data import get_week_scoreboard
+from app.dashboard_data import get_week_scoreboard, load_team_data
+from app.theme import INK_MUTED, SURFACE, contrast_fill
 from app.odds_helpers import format_pregame_line
 
 CARDS_PER_ROW = 4
@@ -52,8 +55,27 @@ def resolve_scoreboard_week(
     return current_week + 1 if (current_week + 1) in week_statuses else current_week
 
 
-def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> bool:
+# This pool's picks are already public before kickoff by its own process:
+# entrants post them to a GroupMe where everyone sees them, and the manager
+# aggregates them into the sheet afterwards. So the scoreboard has nothing left
+# to disclose and may filter and count before a week starts.
+# See docs/pool-process.md.
+#
+# The gate below is kept rather than deleted: set this False for a pool that
+# collects picks privately, and the pre-kickoff protections come back intact.
+PICKS_ARE_PUBLIC = True
+
+
+def should_reveal_picks(
+    scoreboard_week: int,
+    started_weeks: Iterable[int],
+    picks_are_public: bool = PICKS_ARE_PUBLIC,
+) -> bool:
     """Whether the scoreboard may show pick data for `scoreboard_week`.
+
+    Returns True unconditionally when the pool's picks are public anyway - see
+    PICKS_ARE_PUBLIC. The rest of this docstring describes the private-pool
+    case, which is what the gate protects when that flag is off.
 
     A week reveals its picks if and only if one of its OWN games has left
     'pre'. Stated that way the invariant is local and unconditional, which is
@@ -64,6 +86,8 @@ def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> b
     reporting "nothing has started", so both weeks were 1 and 1 <= 1 published
     the entire field's week 1 picks days before kickoff.
     """
+    if picks_are_public:
+        return True
     return scoreboard_week in set(started_weeks)
 
 
@@ -142,82 +166,112 @@ def build_scoreboard(
     return cards
 
 
-def _status_chip(card: Dict[str, Any]) -> None:
-    """Status as a badge. st.badge's colours are theme tokens, not literals."""
+def _status_html(card: Dict[str, Any]) -> str:
+    """Kickoff time, or the game's state once it has one."""
     if card["status"] == "in":
-        st.badge("LIVE", icon="🔴", color="red")
-    elif card["status"] == "final":
-        st.badge("FINAL", color="gray")
-    elif card["kickoff"]:
+        return '<span class="sb-live"><span class="sb-pulse"></span>LIVE</span>'
+    if card["status"] == "final":
+        return '<span class="sb-when">FINAL</span>'
+    if card["kickoff"]:
         local = _as_utc(card["kickoff"]).astimezone(PACIFIC)
-        st.badge(local.strftime("%a %-I:%M %p"), icon="🕐", color="gray")
-    else:
-        st.badge("TBD", color="gray")
+        return f'<span class="sb-when">{local.strftime("%a %-I:%M %p")}</span>'
+    return '<span class="sb-when">TBD</span>'
 
 
-def _team_row(side: Dict[str, Any], status: str) -> None:
-    name, score = st.columns([3, 1], vertical_alignment="center")
-    with name:
-        weight = "**" if side["outcome"] == "won" else ""
-        label = f"{weight}{side['team']}{weight}"
-        if side["picks"]:
-            entries = "entry" if side["picks"] == 1 else "entries"
-            label += f" &nbsp;`{side['picks']} {entries}`"
-        st.markdown(label)
-    with score:
-        if status == "pre" or side["score"] is None:
-            st.markdown("&nbsp;")
-        else:
-            weight = "**" if side["outcome"] == "won" else ""
-            st.markdown(f"{weight}{side['score']}{weight}")
+def _team_html(side: Dict[str, Any], status: str, color: str) -> str:
+    """One team's line: colour bar, abbreviation, pick count, score.
+
+    The count sits in a pill next to the name rather than as text, so it never
+    reads as part of the score at the other end of the row. Both teams get one
+    when both were picked - rare, but it happened twice in 2025.
+    """
+    team = html.escape(side["team"])
+    state = f" {side['outcome']}" if side["outcome"] else ""
+
+    picks = ""
+    if side["picks"]:
+        entries = "entry" if side["picks"] == 1 else "entries"
+        picks = (f'<span class="sb-picks" title="{side["picks"]} {entries}">'
+                 f'{side["picks"]}</span>')
+
+    score = ""
+    if status != "pre" and side["score"] is not None:
+        score = f'<span class="sb-score{state}">{side["score"]}</span>'
+
+    return (
+        f'<div class="sb-row">'
+        f'<span class="sb-bar" style="background:{color}"></span>'
+        f'<span class="sb-team{state}">{team}</span>'
+        f'{picks}<span class="sb-gap"></span>{score}'
+        f'</div>'
+    )
 
 
-def _render_card(card: Dict[str, Any]) -> None:
-    with st.container(border=True):
-        head, line = st.columns([3, 2], vertical_alignment="center")
-        with head:
-            _status_chip(card)
-        with line:
-            if card["line"]:
-                st.caption(card["line"])
+def _card_html(card: Dict[str, Any], colors: Dict[str, str]) -> str:
+    """A whole card as one block.
 
-        _team_row(card["away"], card["status"])
-        _team_row(card["home"], card["status"])
+    One markdown call rather than nested st.columns: the cards sit four to a
+    row now, and each Streamlit block added vertical padding the card could not
+    spare.
+    """
+    line = (f'<span class="sb-line">{html.escape(card["line"])}</span>'
+            if card["line"] else "")
 
-        # The survivor angle, and the reason this isn't just a scoreboard.
-        if card["eliminated"] or card["survived"]:
-            if card["eliminated"]:
-                st.badge(f"{card['eliminated']} eliminated", icon="💀", color="red")
-            if card["survived"]:
-                st.badge(f"{card['survived']} survive", icon="✅", color="green")
+    foot = []
+    if card["eliminated"]:
+        foot.append(f'<span class="sb-out">{card["eliminated"]} out</span>')
+    if card["survived"]:
+        foot.append(f'<span class="sb-through">{card["survived"]} through</span>')
+    footer = (f'<div class="sb-foot">{" ".join(foot)}</div>') if foot else ""
+
+    return (
+        f'<div class="sb-card">'
+        f'<div class="sb-meta">{_status_html(card)}{line}</div>'
+        f'{_team_html(card["away"], card["status"], _dot(card["away"]["team"], colors))}'
+        f'{_team_html(card["home"], card["status"], _dot(card["home"]["team"], colors))}'
+        f'{footer}'
+        f'</div>'
+    )
+
+
+def _dot(team: str, colors: Dict[str, str]) -> str:
+    """A team's colour, lifted to clear the surface.
+
+    The bar is a small mark floating on the surface with no border, so it is
+    the contrast_fill case: GB #203731 is 1.47:1 on the dark surface untreated.
+    """
+    return contrast_fill(colors.get(team, INK_MUTED), SURFACE)
+
+
+def _render_card(card: Dict[str, Any], colors: Dict[str, str]) -> None:
+    st.markdown(_card_html(card, colors), unsafe_allow_html=True)
 
 
 def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> None:
     """The week's scoreboard, as a grid of cards.
 
-    Built only from st.container(border=True) and st.badge, whose colours are
-    theme tokens. There are deliberately no colour literals in this module, so
-    it follows the app's surface wherever that lands.
+    Cards are one markdown block each, styled by the .sb-* rules in
+    app/theme.py. Every colour comes from a theme token or from a team colour
+    passed through contrast_fill - there are no colour literals in this module,
+    so it follows the app's surface wherever that lands.
     """
     data = get_week_scoreboard(season, week)
     cards = build_scoreboard(
         data["games"], data["pick_counts"], data["results"], reveal_picks
     )
 
-    st.markdown(f"### 🏈 Week {week}")
-
-    # Each empty state says WHY it is empty, not merely that it is.
+    # Each empty state says WHY it is empty, not merely that it is. These sit
+    # outside the expander: an expander labelled "0 games" hiding the reason is
+    # worse than the reason itself.
     if not data["games"]:
+        st.markdown(f"### Week {week}")
         st.info(
             f"**No week {week} schedule yet.** Games appear here once the score "
             "ingestion job has pulled this week's fixtures."
         )
         return
     if not cards:
-        # Reachable only with picks present and none of the picked teams
-        # playing: a bye week, or an abbreviation the sheet and the schedule
-        # disagree on. Sending the reader to check the sheet import would point
-        # them at the one thing that definitely worked.
+        st.markdown(f"### Week {week}")
         st.info(
             f"**No week {week} game features a picked team.** Every entrant is "
             "on a team that isn't playing this week — usually a bye, or a team "
@@ -225,19 +279,25 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
         )
         return
 
-    if not reveal_picks:
-        st.caption(
-            "This week hasn't kicked off — showing the full slate. Pick counts "
-            "appear once the games start."
-        )
-    elif not any(card["has_picks"] for card in cards):
-        st.caption("No picks in yet — showing every game this week.")
+    # Collapsible: a full slate is sixteen cards, which is most of a phone
+    # screen before anything else on the page. The count is in the label so the
+    # collapsed state still says what is in there.
+    # Open once the week is under way, collapsed before it. An upcoming slate
+    # is reference material you scroll past; a live one is the reason the page
+    # is open.
+    week_started = any(game["status"] != "pre" for game in data["games"])
+    colors = {team: entry.get("color", INK_MUTED)
+              for team, entry in load_team_data()["teams"].items()}
+    plural = "game" if len(cards) == 1 else "games"
+    with st.expander(f"Week {week} scoreboard - {len(cards)} {plural}",
+                     expanded=week_started):
+        if not week_started:
+            st.caption("This week hasn't kicked off yet.")
+        elif not any(card["has_picks"] for card in cards):
+            st.caption("No picks in yet - showing every game this week.")
 
-    # Four to a row: a card holds two team abbreviations and a kickoff time,
-    # so at two per row most of its width was empty. Streamlit stacks columns
-    # on a narrow viewport, so this is still one card per row on a phone.
-    for start in range(0, len(cards), CARDS_PER_ROW):
-        columns = st.columns(CARDS_PER_ROW, gap="small")
-        for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
-            with column:
-                _render_card(card)
+        for start in range(0, len(cards), CARDS_PER_ROW):
+            columns = st.columns(CARDS_PER_ROW, gap="small")
+            for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
+                with column:
+                    _render_card(card, colors)
