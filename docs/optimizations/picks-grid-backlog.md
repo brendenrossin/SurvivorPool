@@ -77,3 +77,53 @@ loop into one joined query.
 - **`get_player_data` returns every pick for the season with no week clamp**, so
   "Find a Survivor" exposes future picks — the leak the grid exists to prevent.
   Pre-existing and outside this branch, but it contradicts the rule.
+
+## Consequences of moving the app to a dark surface
+
+Measured on `feature/ui-scores-and-grid`, 2026-09-04, reproducible from
+`db/seed_team_map.json` with `relative_luminance` / `mute_color`. The surface
+decision was still open when these were taken.
+
+### The current-week emphasis collapses for dark teams
+
+The grid's whole purpose is to lead with the current week: current cells carry
+true team colour, earlier weeks carry `mute_color(team, background)` at 26%.
+That separation is bounded by the distance from the team's colour to the
+surface, so on a dark surface a dark team has no room to recede into.
+
+CIE76 ΔE between a team's true and muted colour:
+
+| | light `#F8FAFC` | dark `#0B1220` |
+|---|---|---|
+| mean | 63.7 | 37.7 (−41%) |
+| teams under ΔE 10 | 0 | **4** |
+| CHI `#0B162A` | 70.8 | **3.5** |
+| HOU `#03202F` | 67.2 | **6.1** |
+| LV `#000000` | 75.1 | **7.8** |
+| TEN `#0C2340` | 66.6 | **9.7** |
+
+ΔE 3.5 is around the just-noticeable threshold for large patches. For those four
+teams the grid would stop leading with the current week at all.
+
+This is **not** a collision with the elimination encoding — that mutes on
+saturation and stays orthogonal. It is a magnitude problem inside the lightness
+axis.
+
+**No fix has headroom except lifting the emphasised end.** Raising `HISTORY_MIX`
+moves muted *toward* true (worse); lowering it pins muted to the surface (also
+worse). Lifting the current week's fill — `lift_color()`-style, hue preserved —
+is the only direction with room, and it reopens the locked spec's first rule
+that the current week carries the *true* team colour. That is a product call,
+not a fix, so it is recorded here rather than applied.
+
+**If the app stays light, none of this applies** and the grid is already correct.
+
+### Not deferred: `label_ink` was miscalibrated
+
+Found in the same pass and **fixed on this branch**, because it is
+surface-independent and wrong on the shipping light build. `label_ink`
+thresholded relative luminance at `0.45`; the real crossover where dark ink
+overtakes white is `0.1791`. Five teams sat under the 4.5:1 small-text floor —
+CIN and DEN `#FB4F14` at 3.37:1, MIA `#008E97` at 3.95:1, CAR `#0085CA` at
+4.03:1, LAC `#0080C6` at 4.28:1. It now picks whichever ink yields more
+contrast.
