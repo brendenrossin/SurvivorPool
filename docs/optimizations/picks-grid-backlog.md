@@ -127,3 +127,81 @@ overtakes white is `0.1791`. Five teams sat under the 4.5:1 small-text floor —
 CIN and DEN `#FB4F14` at 3.37:1, MIA `#008E97` at 3.95:1, CAR `#0085CA` at
 4.03:1, LAC `#0080C6` at 4.28:1. It now picks whichever ink yields more
 contrast.
+
+## Tri-review of `feature/ui-scores-and-grid` (2026-09-04)
+
+Blocking findings were fixed on the branch (see `5585f4c`). These were verified
+by the reviewers but deliberately not applied, with the reason for each.
+
+### Pre-existing leaks of the same class this branch hardened
+
+- **`get_player_data` returns every pick for the season with no week clamp.**
+  "Find a Survivor" will show a rival's picks for every future week already in
+  the sheet — a strictly larger disclosure than the aggregate counts the grid
+  and scoreboard guard, and it bypasses both because it never passes through
+  `aggregate_picks` or `build_scoreboard`. The `⏳` status branch in
+  `render_player_search` exists precisely to render an unplayed week's team.
+  **Not this branch's regression and not in its files**, but the branch's stated
+  security property is not actually met while this stands. Fix: clamp in
+  `get_player_data` — null the `team` for any week not in
+  `get_started_game_weeks(season)`, keeping the row so the week structure shows.
+
+- **The Thursday-kickoff reveal is now more acute.** `should_reveal_picks` is
+  week-granular: one TNF kickoff opens the whole week's pick counts for ~66
+  hours while every Sunday entrant's pick is still unlocked and still editable
+  in the sheet. `jobs/update_scores.py` already locks picks *per game*, so the
+  codebase knows the right granularity. Fix: pass a per-game gate into
+  `build_scoreboard` so a card still `pre` shows no counts and is exempt from
+  the picked-teams filter. **This changes approved behaviour** (the owner signed
+  off on picked-teams-only with counts for a live week), so it needs a ruling
+  rather than a patch. Related: the entry above this section, which was already
+  open.
+
+- **Sheet-controlled `team_abbr` reaches Plotly's HTML subset unvalidated.**
+  `parse_picks_data` does not validate against `db/seed_team_map.json` despite
+  CLAUDE.md saying it does, and the value flows to `yaxis.ticktext` and the
+  hover text, where Plotly renders `<b>`, `<span style>` and `<a href>`.
+  plotly.js sanitises the protocol, so this is content/link injection rather
+  than script execution, and the abbreviation must survive to a played week to
+  render. Fix belongs at ingest, in `parse_picks_data`. The new legend was
+  checked and is clean: it interpolates only computed colours, and every helper
+  was run over 32 teams × 5 surfaces with no output outside `^#[0-9a-f]{6}$`.
+
+### Efficiency, measured rather than assumed
+
+- **`get_week_game_statuses` duplicates `get_completed_week_count`'s query**, and
+  `get_started_game_weeks` is derivable from it. Three round trips against the
+  games table where one would do. Fix: have both derive from
+  `get_week_game_statuses`. Cached at 60s, so the blast radius is one cache miss
+  per minute.
+- **`get_week_scoreboard` hydrates whole ORM `Game` rows** only to project them
+  into dicts; a column query would do. Its three round trips are the right
+  number — different grains that cannot be merged without a cartesian blowup.
+  No index exists on `picks(season, week)`; worth one if the table grows across
+  many seasons.
+- **The contrast helpers are not the cost.** Measured at 32 rows × 18 weeks:
+  all colour maths is 5.4 ms of an 88.4 ms `build_picks_grid`, and 30 of 32
+  teams return from `contrast_fill` without iterating. 89% of the time is inside
+  Plotly's `update_layout` validation and deepcopy. If the ~36 ms per widget
+  interaction ever matters, the lever is caching the figure on
+  `(current_week, tuple(rows), as_percent)`, not memoising colours.
+- `cell_edge(muted, …)` and `history_ink(muted)` recompute per history cell
+  where they could hoist per row — ~3 ms, tidiness rather than speed.
+
+### Smaller
+
+- `ensure_contrast` pairs `range(1, 21)` with `1 - step * 0.05`; the count and
+  the step must change together. Derive one from the other.
+- `get_week_scoreboard` returns a bare `Dict` on a public function three call
+  sites depend on; a `TypedDict` would state the shape.
+- `tests/test_picks_grid.py` asserts the exact `<b>W3</b>` markup rather than
+  "the current week is emphasised", and compares `layout.shapes` by object
+  equality.
+- `tests/test_dashboard_data.py` covers status `"scheduled"`, which
+  `api/score_providers.py` normalises to `"pre"` before it can reach the
+  database. Harmless, but it documents a state that does not exist.
+- Two bare `except: pass` blocks in `main.py` (the header chip and the KPI row)
+  swallow `BaseException` and leave no trace. Pre-existing.
+- `Player.display_name.ilike(f"%{query}%")` does not escape `%` or `_`. Not SQL
+  injection — SQLAlchemy binds the pattern — but a bare `%` enumerates the
+  roster.
