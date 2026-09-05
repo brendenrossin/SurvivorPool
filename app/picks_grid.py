@@ -145,13 +145,23 @@ def relative_luminance(hex_color: str) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+INKS = ("#0b0b0b", "#ffffff")
+
+
 def label_ink(hex_color: str) -> str:
     """Text colour that stays legible on `hex_color`.
 
-    Computed, never assumed - team colours run from LV black to PIT gold, and
-    assuming one ink is how the tooltip ended up white-on-white.
+    Picks whichever ink actually yields more contrast rather than thresholding
+    luminance. The old threshold was 0.45; the real crossover where dark ink
+    overtakes white is 0.1791 - solve 1.05/(L+0.05) = (L+0.05)/0.05 - so every
+    fill in between took white ink where black reads better. That put five
+    teams under the 4.5:1 small-text floor: CIN and DEN #FB4F14 at 3.37:1,
+    MIA #008E97 at 3.95:1, CAR #0085CA at 4.03:1, LAC #0080C6 at 4.28:1.
+
+    This module says contrast is computed, never assumed. The threshold was the
+    assumption.
     """
-    return "#0b0b0b" if relative_luminance(hex_color) > 0.45 else "#ffffff"
+    return max(INKS, key=lambda ink: contrast_ratio(ink, hex_color))
 
 
 def _share_label(share: float) -> str:
@@ -168,6 +178,105 @@ def mute_color(hex_color: str, background: str, amount: float = HISTORY_MIX) -> 
         for c, b in zip(_channels(hex_color), _channels(background))
     )
     return "#{:02x}{:02x}{:02x}".format(*blended)
+
+
+# Semantic danger hue. Consumed as a HUE ANCHOR rather than as a literal border
+# colour: the border sits on a fill this module chooses, not on the app surface,
+# so its lightness is adjusted per-fill by ensure_contrast(). Swap for
+# app.theme.DANGER when it lands.
+DANGER = "#B91C1C"
+
+WCAG_GRAPHIC_MIN = 3.0   # WCAG 2.1 non-text contrast floor
+
+
+def contrast_ratio(a: str, b: str) -> float:
+    """WCAG contrast ratio between two hex colours."""
+    la, lb = relative_luminance(a), relative_luminance(b)
+    lighter, darker = max(la, lb), min(la, lb)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def ensure_contrast(
+    color: str, against: str, minimum: float = WCAG_GRAPHIC_MIN
+) -> str:
+    """Move `color` toward white or black until it clears `minimum`.
+
+    The danger token is chosen against the app surface, but this border sits on
+    a desaturated fill instead - a different contrast question with a different
+    answer. Rather than keeping a second token in step by hand, the lightness is
+    computed. A no-op whenever the token already clears.
+    """
+    if contrast_ratio(color, against) >= minimum:
+        return color
+
+    # Move away from the fill: darken on a light fill, lighten on a dark one.
+    # Twenty 5% steps reach pure black or white, so this always terminates.
+    toward = "#000000" if relative_luminance(against) > relative_luminance(color) else "#ffffff"
+    for step in range(1, 21):
+        candidate = mute_color(color, toward, 1 - step * 0.05)
+        if contrast_ratio(candidate, against) >= minimum:
+            return candidate
+    return toward
+
+
+def _grey_at(luminance: float) -> str:
+    """The achromatic colour with this WCAG relative luminance."""
+    if luminance <= 0.0031308:
+        channel = 12.92 * luminance
+    else:
+        channel = 1.055 * (luminance ** (1 / 2.4)) - 0.055
+    value = max(0, min(255, round(channel * 255)))
+    return "#{0:02x}{0:02x}{0:02x}".format(value)
+
+
+def eliminated_fill(hex_color: str, background: str) -> str:
+    """Fill for a current-week pick whose game is lost.
+
+    It takes exactly the lightness this team's *history* cells take, with the
+    hue removed. That is the whole design in one line: history mutes on
+    lightness and keeps hue, elimination mutes on saturation and keeps
+    lightness. Holding lightness constant is what proves the two are different
+    axes rather than two points on one - which is what would have collapsed the
+    grid's primary encoding, since muted colour already means "an earlier week".
+
+    The surface enters only through mute_color(), which is already
+    parameterised, so a light/dark reversal costs an argument and nothing else.
+    """
+    return _grey_at(relative_luminance(mute_color(hex_color, background)))
+
+
+def eliminated_edge(fill: str, danger: str = DANGER) -> str:
+    """Border for a busted cell: the danger hue, made legible on `fill`."""
+    return ensure_contrast(danger, fill)
+
+
+DISSOLVE_RATIO = 1.35    # below this a fill and the surface read as one block
+HISTORY_INK_MIX = 0.72   # how much of full-contrast ink history keeps
+
+
+def cell_edge(fill: str, background: str) -> str:
+    """Hairline that stops a cell dissolving into the surface.
+
+    The old rule drew a dark hairline when the fill's luminance cleared 0.6 -
+    correct only because the app was light-only. A light fill on a light surface
+    and a dark fill on a dark one are the same problem, so the test is against
+    the surface rather than against a fixed threshold, and the hairline takes
+    whichever side the surface is not on.
+    """
+    if contrast_ratio(fill, background) >= DISSOLVE_RATIO:
+        return fill
+    return "rgba(0,0,0,.18)" if relative_luminance(background) > 0.45 else "rgba(255,255,255,.28)"
+
+
+def history_ink(fill: str) -> str:
+    """Label ink for an earlier week's cell.
+
+    Deliberately softer than label_ink(): history should recede, and computing
+    full contrast here would darken it and cost the recede effect. It was
+    hardcoded "#52514e" - a dark ink, correct on the light surface it was
+    written for and invisible on a dark one.
+    """
+    return mute_color(label_ink(fill), fill, HISTORY_INK_MIX)
 
 
 def build_picks_grid(

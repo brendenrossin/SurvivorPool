@@ -7,13 +7,27 @@ ordered by that week's count, padded out with the season's most-picked teams.
 import pytest
 
 from app.picks_grid import (
+    DANGER,
     aggregate_picks,
     build_picks_grid,
+    cell_edge,
+    contrast_ratio,
+    eliminated_edge,
+    eliminated_fill,
+    ensure_contrast,
+    history_ink,
     label_ink,
     mute_color,
+    relative_luminance,
     resolve_current_week,
     select_grid_rows,
 )
+
+LIGHT_SURFACE = "#F8FAFC"
+DARK_SURFACE = "#0B1220"
+# Spans the real range in db/seed_team_map.json: LV black to PIT gold.
+TEAM_COLORS = ["#D50A0A", "#311D00", "#002244", "#FB4F14", "#000000", "#FFB612",
+               "#203731", "#00338D", "#0B162A", "#003594", "#D3BC8D", "#69BE28"]
 
 SEASON_TOTALS = {"DEN": 132, "GB": 116, "BUF": 113, "ARI": 110, "BAL": 99,
                  "LAR": 98, "DET": 98, "SEA": 74, "KC": 40, "TB": 30,
@@ -87,10 +101,14 @@ def test_expanded_keeps_the_current_week_on_top():
     ("#D3BC8D", True),   # NO  vegas gold - luminance .52
     ("#000000", False),  # LV  black
     ("#0B162A", False),  # CHI navy
-    ("#FB4F14", False),  # DEN orange     - luminance .26
+    # DEN/CIN orange, luminance .26. This case asserted False, because it was
+    # written against the 0.45 threshold rather than against contrast: white
+    # ink gives 3.37:1 here and dark ink gives 5.84:1, so white was the wrong
+    # answer and the test was encoding the bug. The crossover is 0.1791.
+    ("#FB4F14", True),
 ])
 def test_label_ink_contrasts_with_the_fill(hex_color, expected_dark):
-    """Ink is computed from luminance, never assumed."""
+    """Ink is computed from contrast, never assumed."""
     assert (label_ink(hex_color) == "#0b0b0b") is expected_dark
 
 
@@ -246,3 +264,114 @@ class TestResolveCurrentWeekWithGaps:
         for started in ([1], [1, 2], [1, 2, 3], range(1, 19)):
             week = resolve_current_week(pick_weeks=[1, 3, 5], started_game_weeks=started)
             assert week in (1, 3, 5)
+
+
+class TestEliminatedCell:
+    """The busted current-week fill must never be readable as history.
+
+    The grid already mutes toward the surface to mean "an earlier week". If
+    elimination muted the same way the grid would lose its primary encoding, so
+    elimination drains SATURATION while history drains LIGHTNESS.
+    """
+
+    def test_the_fill_is_achromatic(self):
+        """Hue is the channel elimination gives up."""
+        for team in TEAM_COLORS:
+            fill = eliminated_fill(team, LIGHT_SURFACE)
+            r, g, b = int(fill[1:3], 16), int(fill[3:5], 16), int(fill[5:7], 16)
+            assert r == g == b, f"{team} -> {fill} kept a hue"
+
+    def test_it_holds_the_lightness_its_history_cells_take(self):
+        """Holding lightness constant is what proves the axes are different."""
+        for team in TEAM_COLORS:
+            history = mute_color(team, LIGHT_SURFACE)
+            fill = eliminated_fill(team, LIGHT_SURFACE)
+            assert abs(relative_luminance(fill) - relative_luminance(history)) < 0.02
+
+    def test_it_never_equals_the_muted_history_colour(self):
+        """The collision this whole design exists to prevent."""
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert eliminated_fill(team, surface) != mute_color(team, surface)
+
+    def test_it_never_equals_the_current_week_colour(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert eliminated_fill(team, surface).lower() != team.lower()
+
+    def test_it_follows_the_surface(self):
+        """A light/dark reversal must be an argument change, not a rewrite."""
+        for team in TEAM_COLORS:
+            assert eliminated_fill(team, LIGHT_SURFACE) != eliminated_fill(team, DARK_SURFACE)
+
+    def test_a_black_team_still_moves(self):
+        """LV is already black; its history cell and its busted cell still differ."""
+        assert eliminated_fill("#000000", LIGHT_SURFACE) != mute_color("#000000", LIGHT_SURFACE)
+
+
+class TestEliminatedEdge:
+    """The red border is the primary signal, so its contrast is computed."""
+
+    def test_the_edge_clears_three_to_one_on_every_team_and_surface(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = eliminated_fill(team, surface)
+                assert contrast_ratio(eliminated_edge(fill, DANGER), fill) >= 3.0
+
+    def test_the_token_passes_through_untouched_when_it_already_clears(self):
+        """ensure_contrast is a no-op when the token already works."""
+        assert ensure_contrast("#B91C1C", "#FFFFFF") == "#B91C1C"
+
+    def test_contrast_ratio_is_symmetric_and_bounded(self):
+        assert contrast_ratio("#000000", "#FFFFFF") == contrast_ratio("#FFFFFF", "#000000")
+        assert round(contrast_ratio("#000000", "#FFFFFF"), 1) == 21.0
+        assert contrast_ratio("#777777", "#777777") == 1.0
+
+
+class TestLabelInkPicksTheBetterInk:
+    """label_ink thresholded luminance at 0.45. The real crossover is 0.1791,
+    so every fill between them got white ink where black reads better - five
+    teams under the 4.5:1 small-text floor on the shipping light build."""
+
+    def test_the_failing_teams_now_clear_the_small_text_floor(self):
+        # CIN/DEN, MIA, CAR, LAC
+        for team in ("#FB4F14", "#008E97", "#0085CA", "#0080C6"):
+            assert contrast_ratio(label_ink(team), team) >= 4.5
+
+    def test_it_always_picks_the_higher_contrast_ink(self):
+        for team in TEAM_COLORS + ["#FB4F14", "#008E97", "#0085CA", "#0080C6"]:
+            chosen = contrast_ratio(label_ink(team), team)
+            best = max(contrast_ratio(ink, team) for ink in ("#0b0b0b", "#ffffff"))
+            assert chosen == best, f"{team} took the worse ink"
+
+    def test_the_extremes_are_unchanged(self):
+        """LV black and PIT gold were already right; don't regress them."""
+        assert label_ink("#000000") == "#ffffff"
+        assert label_ink("#FFB612") == "#0b0b0b"
+
+
+class TestSurfaceDerivedInk:
+    """Three colours were hardcoded for a light surface. They invert on a dark
+    one - a dark fill is the one that dissolves there, not a light one."""
+
+    def test_a_cell_that_would_dissolve_gets_a_hairline(self):
+        """A near-white fill on a near-white surface needs an edge."""
+        assert cell_edge("#FEFEFE", LIGHT_SURFACE) != "#FEFEFE"
+
+    def test_the_same_rule_catches_a_dark_fill_on_a_dark_surface(self):
+        """The case the old > 0.6 threshold could not see."""
+        assert cell_edge("#0B162A", DARK_SURFACE) != "#0B162A"
+
+    def test_a_cell_with_its_own_contrast_keeps_its_own_edge(self):
+        assert cell_edge("#D50A0A", LIGHT_SURFACE) == "#D50A0A"
+
+    def test_history_ink_is_legible_on_its_own_fill(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = mute_color(team, surface)
+                assert contrast_ratio(history_ink(fill), fill) >= 3.0
+
+    def test_history_ink_recedes_rather_than_shouting(self):
+        """Deliberately softer than full contrast - history should recede."""
+        fill = mute_color("#D50A0A", LIGHT_SURFACE)
+        assert contrast_ratio(history_ink(fill), fill) < contrast_ratio(label_ink(fill), fill)
