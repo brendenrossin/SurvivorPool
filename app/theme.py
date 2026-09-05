@@ -133,10 +133,15 @@ html, body, [class*="css"] {{
 h1, h2, h3 {{ letter-spacing: -0.02em; color: {INK}; }}
 h1 {{ font-weight: 800; font-size: 1.9rem; }}
 
-/* Section eyebrow - what the emoji headings became */
+/* Two levels, so a section reads as bigger than a panel inside it.
+   Both replace emoji headings. */
+.section-title {{
+  font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em;
+  color: {INK}; margin: .2rem 0 .9rem 0;
+}}
 .eyebrow {{
   font-size: .72rem; font-weight: 700; letter-spacing: .14em;
-  text-transform: uppercase; color: {INK_MUTED}; margin: 0 0 .4rem 0;
+  text-transform: uppercase; color: {INK_MUTED}; margin: 1.4rem 0 .4rem 0;
 }}
 
 .card {{
@@ -155,7 +160,9 @@ h1 {{ font-weight: 800; font-size: 1.9rem; }}
   font-size: 2.6rem; font-weight: 800; line-height: 1.05; color: {INK};
   font-variant-numeric: tabular-nums;
 }}
-.kpi-sub {{ font-size: .82rem; color: {INK_MUTED}; }}
+/* Bottom rhythm matters most on a phone, where the three KPI
+   columns stack into one and would otherwise run together. */
+.kpi-sub {{ font-size: .82rem; color: {INK_MUTED}; margin-bottom: 1.4rem; }}
 
 /* Text badges - what the status emoji became */
 .badge {{

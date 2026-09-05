@@ -116,7 +116,8 @@ def main():
         summary_preview = get_summary_data(SEASON)
         series = get_attrition_series(SEASON)
 
-        st.markdown('<div class="eyebrow">Key stats</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Key stats</div>',
+                    unsafe_allow_html=True)
         k1, k2, k3 = st.columns(3)
 
         remaining = summary_preview.get("entrants_remaining", 0)
@@ -227,7 +228,8 @@ def main():
     render_meme_stats(meme_stats)
 
     st.divider()
-    st.markdown('<div class="eyebrow">Pool insights</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Pool insights</div>',
+                unsafe_allow_html=True)
 
     # Each widget reads through a cached function in dashboard_data, so these
     # tab bodies no longer open a session apiece on every script run.

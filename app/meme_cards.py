@@ -125,7 +125,7 @@ def _render_panel(title, subtitle, rows, empty_message, tone):
 
 def render_meme_stats(meme_stats):
     """Render both notable-picks panels."""
-    st.markdown('<div class="eyebrow">Notable picks</div>',
+    st.markdown('<div class="section-title">Notable picks</div>',
                 unsafe_allow_html=True)
     left, right = st.columns(2)
     with left:
