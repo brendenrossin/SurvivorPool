@@ -9,7 +9,6 @@ rate limit.
 
 from datetime import datetime, timezone
 
-from api.models import ChatMessage
 from jobs import backfill_groupme
 
 
@@ -23,15 +22,45 @@ SEP_2025 = int(datetime(2025, 9, 1, tzinfo=timezone.utc).timestamp())
 AUG_2025 = int(datetime(2025, 8, 1, tzinfo=timezone.utc).timestamp())
 
 
-def test_backfill_stops_at_the_since_date(job_db, monkeypatch):
-    monkeypatch.setattr(backfill_groupme, "iter_messages",
-                        lambda *a, **k: iter([raw("m2", SEP_2025), raw("m1", AUG_2025)]))
+def test_backfill_stops_walking_at_the_since_date(job_db, monkeypatch):
+    """Proves the walk HALTS, not merely that old messages are filtered.
+
+    The rate limit is why this matters: `since` and the page ceiling are the
+    only stop conditions, so a filter-but-keep-walking bug would drag the whole
+    group history through the API every run. A materialized-list mock cannot
+    show the difference - swapping `break` for `continue` passes it
+    identically - so this mock is a generator that records how far it got.
+    """
+    consumed = []
+
+    def walking(*a, **k):
+        for message in [raw("m3", SEP_2025),
+                        raw("m2", AUG_2025),
+                        raw("m1", AUG_2025 - 100)]:
+            consumed.append(message["id"])
+            yield message
+
+    monkeypatch.setattr(backfill_groupme, "iter_messages", walking)
 
     stored = backfill_groupme.backfill(
         since=datetime(2025, 9, 1, tzinfo=timezone.utc))
 
     assert stored == 1
-    assert [r.message_id for r in job_db.query(ChatMessage).all()] == ["m2"]
+    assert consumed == ["m3", "m2"]   # halted at the first out-of-range message
+
+
+def test_backfill_bounds_the_walk_with_a_page_ceiling(job_db, monkeypatch):
+    """A dropped max_pages would let a bad --since walk the entire history."""
+    seen = {}
+
+    def capture(group_id, token, **kwargs):
+        seen.update(kwargs)
+        return iter([raw("m1", SEP_2025)])
+
+    monkeypatch.setattr(backfill_groupme, "iter_messages", capture)
+    backfill_groupme.backfill(since=datetime(2025, 9, 1, tzinfo=timezone.utc))
+
+    assert seen["max_pages"] == backfill_groupme.MAX_PAGES
 
 
 def test_backfill_returns_zero_on_empty_history(job_db, monkeypatch):
