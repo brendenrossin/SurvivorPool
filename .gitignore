@@ -4,6 +4,8 @@
 .env.local.real
 .env.development
 .env.production
+.env.bak*
+.env.*.bak
 *.env
 
 # Python virtual environment
