@@ -173,6 +173,45 @@ optional garnish rather than the headline.
   the app. Replaced by a large numeral plus the attrition curve with the current week
   marked, reusing `attrition.py` rather than introducing a fifth chart idiom.
 
+### Surface is a token, not a decision baked into components
+
+`theme.py` defines **both** palettes and selects between them with a single switch.
+Every colour any component uses resolves through that switch; no component holds a
+surface literal. A light/dark reversal is therefore one line, not a rewrite.
+
+This is deliberate insurance: the dark direction was chosen by the owner, but a
+parallel session has since recommended light to them and the question is not closed.
+Building surface-agnostic costs almost nothing and makes the reversal cheap either way.
+
+Exported tokens, consumed by this branch and by Session B:
+
+`SURFACE` · `SURFACE_RAISED` · `INK` · `INK_MUTED` · `BORDER` · `DANGER` · `WIN` ·
+`PENDING`
+
+`SURFACE` replaces `APP_SURFACE` at `main.py:62` and remains what
+`build_picks_grid(background=...)` receives. `DANGER` resolves to `#B91C1C` on light
+and `#EF4444` on dark.
+
+### `lift_color` applies to floating marks only — never to the grid
+
+The distinction that makes surface choice and colour fidelity independent:
+
+- **A bounded mark** — a grid cell — is a rectangle with a hairline border and
+  contrast-derived label ink. Its legibility does not depend on fill-vs-surface
+  contrast at all: the border delimits it and the ink is computed from the fill.
+  Verified across all 32 teams — `LV #000000` takes white ink, `PIT #FFB612` takes
+  dark ink. **A bounded cell keeps true team colour on any surface.**
+- **A floating mark** — a Team of Doom bar — sits directly on the surface with no
+  border. Its legibility is entirely fill-vs-surface contrast, which is where 22 of 32
+  teams fail on dark and where `lift_color` is required.
+
+So `lift_color` is scoped to this branch's bars. The picks grid neither needs nor
+imports it, and keeps actual team colours rather than lifted approximations.
+
+This also keeps Session B's two muting axes orthogonal: history mutes on **lightness**
+preserving hue, elimination mutes on **saturation** dropping it. `lift_color` moves
+lightness, which would collide — hence it stays out of that module entirely.
+
 ### Emoji: removed, not reduced
 
 There are **103 emoji across the five files this branch touches**. They are a large
