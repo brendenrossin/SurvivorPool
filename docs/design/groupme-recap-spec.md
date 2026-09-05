@@ -393,12 +393,23 @@ Each phase is independently verifiable, so work can stop at any boundary.
 Phase 4 is blocked on the owner creating the test group and both bots — an
 out-of-repo prerequisite, not a code task.
 
+## Verified against the live API (2026-09-05)
+
+Token and group id are in place; group `24708586` "NFL Survivor 2026", 284 members.
+
+- **Removed members' messages are RETAINED.** Walking 500 messages found 127 distinct
+  authors, 5 of them no longer members, with 160 of their messages still visible. The
+  epic's biggest open risk is closed: the voice corpus is not survivor-only.
+- **Header auth works.** `X-Access-Token` returns HTTP 200. Query-param auth also
+  returns 200, so the documented one-line fallback is real if it is ever needed.
+- **The envelope matches what the parser assumes**: `created_at` in unix seconds,
+  `system` bool, `sender_type` string, `favorited_by` a list. Also present and unused:
+  `attachments`, `avatar_url`, `pinned_at`, `pinned_by`, `platform`, `sender_id`,
+  `source_guid`.
+
 ## Open questions
 
-- **Do removed members' messages persist in group history?** The entire voice corpus
-  depends on it, since most of the season's chat was written by people who have since
-  been removed. Verify first thing in phase 1; if GroupMe purges them, the corpus is
-  survivor-only and much thinner than assumed.
+- ~~Do removed members' messages persist?~~ **Answered: yes.**
 - **Recap on the dashboard.** Storing `weekly_recaps` makes rendering past recaps on
   the dashboard nearly free later. Deliberately out of scope for this spec.
 

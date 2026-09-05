@@ -29,13 +29,14 @@ Spec: [`docs/design/groupme-recap-spec.md`](design/groupme-recap-spec.md)
 built, reviewed and merged-ready (347 tests). Task 1 — the credential step and the
 retention probe — is still open, so these definition-of-done items remain unmet:
 
-- [ ] Retention probe answered RETAINED (does GroupMe keep removed members' messages?)
+- [x] Retention probe answered **RETAINED** — 160 messages from 5 ex-members still visible
 - [ ] `chat_messages` populated from a real backfill, row count recorded
 - [ ] `job_meta` carries an `ingest_groupme` success row
 - [ ] A removal system message spot-checked with `is_system = true`
-- [ ] **Header auth confirmed.** The client sends `X-Access-Token` and this has
-      never touched the live API. If it 401s, reverting to a `token` query param
-      is one line and the redaction layer still protects logs.
+- [x] **Header auth confirmed** — `X-Access-Token` returns HTTP 200 against the
+      live API. Query-param auth also works, so the fallback is real.
+- [x] Envelope confirmed: `created_at` unix seconds, `system` bool, `sender_type`
+      string, `favorited_by` a list — every key the parser assumes.
 
 ## Epic: Engineering debt found during GRPM-1
 > Surfaced by review while building the GroupMe ingestion. None introduced by it.
@@ -70,7 +71,5 @@ retention probe — is still open, so these definition-of-done items remain unme
   reach the real chat.
 - GRPM-5 needs GRPM-4 to have soaked.
 
-**Open risk on GRPM-1.** Most of the 2025 chat was written by players Travis has since
-removed from the group. The entire voice corpus depends on GroupMe retaining their
-messages after removal. Verify this before building the backfill loop; if it fails,
-GRPM-3's few-shot strategy needs rethinking and the spec's assumptions change.
+**GRPM-1's open risk is CLOSED.** GroupMe retains removed members' messages, so the
+voice corpus is not survivor-only and GRPM-3's few-shot strategy stands as specced.
