@@ -14,9 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"  # Better for mobile
 )
 
-import plotly.graph_objects as go
 import pandas as pd
-from datetime import datetime
 import os
 import sys
 import logging
@@ -28,7 +26,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print("🚀 Starting Survivor Pool Dashboard...")
 print("✅ Streamlit app starting...")
 
-from api.database import SessionLocal
 from app.dashboard_data import (
     load_team_data,
     get_summary_data,
@@ -65,8 +62,6 @@ from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
 from app.mobile_plotly_config import get_mobile_config
-from app.odds_helpers import get_underdog_spread_text
-from app.theme import WIN, DANGER
 
 # Load environment
 from dotenv import load_dotenv
@@ -75,7 +70,7 @@ load_dotenv()
 # Configuration
 SEASON = int(os.getenv("NFL_SEASON", 2025))
 COUNT_LABEL, PERCENT_LABEL = "Count", "% of week"
-# Floor the current week's fills must clear against APP_SURFACE. WCAG 2.1's
+# Floor the current week's fills must clear against SURFACE. WCAG 2.1's
 # non-text minimum; see contrast_fill in app/picks_grid.py for why the grid
 # needs it at all.
 EMPHASIS_MIN_CONTRAST = 3.0
@@ -201,7 +196,6 @@ def main():
     try:
         summary = get_summary_data(SEASON)
         meme_stats = get_meme_stats(SEASON)
-        data_loaded = True
     except Exception as e:
         st.warning(f"Database not fully populated yet: {e}")
         st.info("Starting up. Data appears once Google Sheets access is configured.")
@@ -217,7 +211,6 @@ def main():
             "dumbest_picks": [],
             "big_balls_picks": []
         }
-        data_loaded = False
 
     # Main dashboard layout - Weekly picks chart as main focus
     render_weekly_picks_chart(summary)
@@ -346,12 +339,12 @@ def render_weekly_picks_chart(summary):
         'border-radius:2px;vertical-align:-1px;'
     )
     sample = get_team_color_map().get(rows[0], "#666666")
-    lifted = contrast_fill(sample, APP_SURFACE, EMPHASIS_MIN_CONTRAST)
-    out_fill = eliminated_fill(sample, APP_SURFACE)
+    lifted = contrast_fill(sample, SURFACE, EMPHASIS_MIN_CONTRAST)
+    out_fill = eliminated_fill(sample, SURFACE)
     st.caption(
         f'<span style="background:{lifted};{swatch}"></span> this week'
         ' &nbsp;·&nbsp; '
-        f'<span style="background:{mute_color(sample, APP_SURFACE)};{swatch}"></span>'
+        f'<span style="background:{mute_color(sample, SURFACE)};{swatch}"></span>'
         ' earlier weeks'
         ' &nbsp;·&nbsp; '
         f'<span style="background:{out_fill};border:2px solid '
@@ -425,7 +418,7 @@ def render_player_search():
 
 def render_last_updated_chip(last_updates):
     """Render last updated timestamp at top of page"""
-    from datetime import timezone, timedelta
+    from datetime import timezone
 
     # Prefer scores timestamp if present, else ingest
     ts = last_updates.get("update_scores") or last_updates.get("ingest_sheet")

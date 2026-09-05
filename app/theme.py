@@ -5,16 +5,33 @@ Single source of truth for every colour in the app. Both palettes are defined
 and selected by one switch, so a light/dark reversal is one line and no
 component holds a surface literal.
 
-The colour maths (relative_luminance, label_ink, mute_color) is imported from
-picks_grid rather than copied. The backlog records that theme tokens are already
-forked between picks_grid and mobile_plotly_config, and that the white-on-white
-hover bug was consequently fixed twice in two places. This is not a third fork.
+All colour maths is imported from picks_grid rather than copied. The backlog
+records that theme tokens were already forked between picks_grid and
+mobile_plotly_config, and that the white-on-white hover bug was consequently
+fixed twice in two places. This is not a third fork.
+
+contrast_fill lives there because picks_grid merged first and cannot import a
+module that did not yet exist on staging. It is re-exported here so callers
+have one place to import colour from.
 """
 
-import colorsys
-from typing import Dict, Tuple
+from typing import Dict
 
-from app.picks_grid import relative_luminance, label_ink, mute_color  # noqa: F401
+from app.picks_grid import (
+    contrast_fill,
+    contrast_ratio,
+    label_ink,
+    mute_color,
+    relative_luminance,
+)
+
+# Re-exported so callers have one place to import colour from.
+__all__ = [
+    "contrast_fill", "contrast_ratio", "label_ink", "mute_color",
+    "relative_luminance", "PALETTES", "ACTIVE", "GLOBAL_CSS", "FONT_STACK",
+    "SURFACE", "SURFACE_RAISED", "INK", "INK_MUTED", "BORDER",
+    "DANGER", "WIN", "PENDING", "ACCENT",
+]
 
 PALETTES: Dict[str, Dict[str, str]] = {
     "dark": {
@@ -55,68 +72,6 @@ PENDING = PALETTES[ACTIVE]["PENDING"]
 ACCENT = PALETTES[ACTIVE]["ACCENT"]
 
 FONT_STACK = "Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif"
-
-
-def _channels(hex_color: str) -> Tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def _to_hex(rgb_floats) -> str:
-    return "#%02X%02X%02X" % tuple(
-        max(0, min(255, int(round(v * 255)))) for v in rgb_floats
-    )
-
-
-def contrast_ratio(a: str, b: str) -> float:
-    """WCAG relative contrast between two hex colours."""
-    la, lb = relative_luminance(a), relative_luminance(b)
-    hi, lo = max(la, lb), min(la, lb)
-    return (hi + 0.05) / (lo + 0.05)
-
-
-def contrast_fill(color: str, background: str, target: float = 3.0,
-                  steps: int = 200) -> str:
-    """Move a fill's lightness until it clears `target` against `background`.
-
-    Hue and saturation are preserved, so team identity survives - only the
-    lightness moves, and only as far as it must.
-
-    Direction depends on the surface, which is why this is not called "lift":
-    on the dark surface 22 of 32 team colours fail and must go up (GB #203731
-    is 1.47:1); on the light surface PIT and NO fail and must come DOWN. A
-    lift-only implementation runs PIT to white.
-
-    Two uses, both deliberate:
-
-    - Marks that FLOAT on the surface - bars with no border - where legibility
-      is entirely fill-vs-surface contrast.
-    - The picks grid's CURRENT WEEK, where the job is emphasis rather than
-      legibility: history mutes toward the surface, so a team whose colour is
-      already surface-adjacent has nowhere to separate to. Never applied to
-      history, which must keep muting on lightness alone.
-
-    A bounded mark's legibility never depends on this - it carries a hairline
-    and contrast-derived ink, and keeps its true team colour.
-    """
-    if contrast_ratio(color, background) >= target:
-        return color
-
-    r, g, b = _channels(color)
-    hue, lightness, saturation = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
-    lighten = relative_luminance(background) < 0.5
-
-    for i in range(1, steps + 1):
-        step = i / steps
-        new_l = (
-            lightness + (1.0 - lightness) * step if lighten
-            else lightness * (1 - step)
-        )
-        candidate = _to_hex(colorsys.hls_to_rgb(hue, new_l, saturation))
-        if contrast_ratio(candidate, background) >= target:
-            return candidate
-
-    return "#FFFFFF" if lighten else "#000000"
 
 
 GLOBAL_CSS = f"""

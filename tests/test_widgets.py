@@ -130,43 +130,39 @@ class TestMainWiring:
         assert "def render_meme_stats" not in self.SRC
         assert "from app.meme_cards import render_meme_stats" in self.SRC
 
-    def _my_regions(self):
-        """main.py minus Session B's territory: the live-scores block and
-        render_weekly_picks_chart (which includes the breakdown table)."""
-        src = self.SRC
-        live_start = src.index("    # Live Scores Widget")
-        live_end = src.index("    st.divider()", live_start)
-        grid_start = src.index("def render_weekly_picks_chart")
-        grid_end = src.index("def render_player_search")
-        return src[:live_start] + src[live_end:grid_start] + src[grid_end:]
+    # Session B owns render_weekly_picks_chart and the live-scores call.
+    # Everything else in main.py is this branch's.
+    THEIRS = {"render_weekly_picks_chart"}
 
-    def test_insights_tabs_open_no_sessions(self):
-        # Both remaining SessionLocal() calls are Session B's - live scores and
-        # the breakdown table. Nothing this branch owns opens one.
-        assert "SessionLocal()" not in self._my_regions()
+    def _my_functions(self):
+        """Source of the top-level functions this branch owns.
 
-    def test_widgets_are_called_without_a_db_handle(self):
-        # The renderers are dispatched from a tuple now, so assert the property
-        # rather than a literal call string: nothing is handed a session.
-        for name in ("render_team_of_doom_widget", "render_survivors_widget",
-                     "render_graveyard_widget", "render_chaos_meter_widget"):
-            assert name in self.SRC
-            assert f"{name}(db" not in self.SRC
-            assert f"{name}(SESSION" not in self.SRC
+        Resolved through the AST rather than by slicing on comment text, so it
+        survives the other session restructuring the file around us.
+        """
+        import ast
+        tree = ast.parse(self.SRC)
+        return {
+            node.name: ast.get_source_segment(self.SRC, node)
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name not in self.THEIRS
+        }
+
+    def test_no_module_opens_a_session(self):
+        # Both sessions moved their reads behind cached functions, so nothing
+        # in main.py should construct one any more.
+        assert "SessionLocal()" not in self.SRC
+
+    def test_no_emoji_in_the_functions_this_branch_owns(self):
+        for name, source in self._my_functions().items():
+            if name == "main":
+                # main() still contains the live-scores call, which is theirs
+                source = source.split("render_live_scores_widget")[0]
+            offenders = sorted({ch for ch in source if ord(ch) >= 0x2500})
+            assert not offenders, f"{name}: {offenders}"
 
     def test_kpi_row_carries_the_sparkline(self):
         assert "build_sparkline" in self.SRC
-
-    def test_no_emoji_in_ui_copy_this_branch_owns(self):
-        # page_icon is the browser tab icon, not UI copy, and the startup
-        # prints go to Railway logs - both stay.
-        mine = self._my_regions()
-        for skip in ('page_icon="\U0001F3C8",',
-                     'print("\U0001F680 Starting Survivor Pool Dashboard...")',
-                     'print("\u2705 Streamlit app starting...")'):
-            mine = mine.replace(skip, "")
-        offenders = sorted({ch for ch in mine if ord(ch) >= 0x2500})
-        assert not offenders, offenders
 
 
 class TestInsightsTabsAreIsolated:
@@ -181,3 +177,33 @@ class TestInsightsTabsAreIsolated:
 
     def test_failure_is_logged_with_the_panel_name(self):
         assert 'logging.exception("%s failed to render", name)' in self.SRC
+
+
+class TestNoUndefinedNames:
+    """A NameError gate.
+
+    This bug class has bitten this project twice in one day: a missing import
+    killed all four Pool Insights tabs while each printed its empty-state
+    message, so a dead feature looked exactly like an empty pool; and a
+    constant renamed on one branch left three live references in a region the
+    suite never executes.
+
+    Scoped to undefined names only - not unused imports - so it stays a
+    zero-false-positive correctness gate rather than a style checker.
+    """
+
+    def test_app_package_has_no_undefined_names(self):
+        import pathlib
+        import subprocess
+        import sys
+
+        files = sorted(str(p) for p in pathlib.Path("app").glob("*.py"))
+        result = subprocess.run(
+            [sys.executable, "-m", "pyflakes", *files],
+            capture_output=True, text=True,
+        )
+        undefined = [
+            line for line in result.stdout.splitlines()
+            if "undefined name" in line
+        ]
+        assert not undefined, "\n".join(undefined)

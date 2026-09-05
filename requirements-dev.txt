@@ -1,3 +1,4 @@
 # Development/test dependencies (not installed on Railway)
 # Install with: pip install -r requirements-dev.txt
 pytest==8.4.2
+pyflakes>=3.0  # NameError gate, see tests/test_widgets.py::TestNoUndefinedNames

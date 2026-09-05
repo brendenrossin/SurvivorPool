@@ -2,7 +2,6 @@
 Data fetching functions for Streamlit dashboard
 """
 
-import os
 import json
 import streamlit as st
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -11,9 +10,7 @@ try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
     from typing import TypedDict
 except ImportError:  # pragma: no cover
     TypedDict = None
-from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_, select, text
-from datetime import datetime
 
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult, Game, JobMeta
