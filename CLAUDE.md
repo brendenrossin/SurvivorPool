@@ -399,6 +399,22 @@ Verify before flipping the vars — the tab must be named `Picks` to match
 `parse_picks_data()` in `jobs/sheets_ingestion_shared.py` matches `Week ` + digits
 literally and silently ignores any column it doesn't recognise.
 
+## 📋 How the pool actually runs
+
+Picks are **public before kickoff**: entrants post them to a GroupMe, everyone
+sees them, and the manager aggregates them into the Google Sheet afterwards. By
+the time a pick reaches the database it has been public for hours or days.
+
+This is why `app/live_scores.py` sets `PICKS_ARE_PUBLIC = True` and the
+scoreboard filters to picked teams before a week starts. Read
+`docs/pool-process.md` before treating that as a disclosure bug - it was
+treated as one once, correctly, until the process was known. The gate is kept
+for a pool that collects picks privately.
+
+It does **not** license showing *future* weeks. The picks grid still stops at
+the last week that kicked off, because the sheet holds later weeks' picks from
+day one - a different question. See `docs/design/picks-grid-spec.md`.
+
 ## 🎯 MVP vs Future Features
 
 ### ✅ Current MVP Features

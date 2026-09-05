@@ -52,8 +52,27 @@ def resolve_scoreboard_week(
     return current_week + 1 if (current_week + 1) in week_statuses else current_week
 
 
-def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> bool:
+# This pool's picks are already public before kickoff by its own process:
+# entrants post them to a GroupMe where everyone sees them, and the manager
+# aggregates them into the sheet afterwards. So the scoreboard has nothing left
+# to disclose and may filter and count before a week starts.
+# See docs/pool-process.md.
+#
+# The gate below is kept rather than deleted: set this False for a pool that
+# collects picks privately, and the pre-kickoff protections come back intact.
+PICKS_ARE_PUBLIC = True
+
+
+def should_reveal_picks(
+    scoreboard_week: int,
+    started_weeks: Iterable[int],
+    picks_are_public: bool = PICKS_ARE_PUBLIC,
+) -> bool:
     """Whether the scoreboard may show pick data for `scoreboard_week`.
+
+    Returns True unconditionally when the pool's picks are public anyway - see
+    PICKS_ARE_PUBLIC. The rest of this docstring describes the private-pool
+    case, which is what the gate protects when that flag is off.
 
     A week reveals its picks if and only if one of its OWN games has left
     'pre'. Stated that way the invariant is local and unconditional, which is
@@ -64,6 +83,8 @@ def should_reveal_picks(scoreboard_week: int, started_weeks: Iterable[int]) -> b
     reporting "nothing has started", so both weeks were 1 and 1 <= 1 published
     the entire field's week 1 picks days before kickoff.
     """
+    if picks_are_public:
+        return True
     return scoreboard_week in set(started_weeks)
 
 
@@ -226,14 +247,15 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
     # Collapsible: a full slate is sixteen cards, which is most of a phone
     # screen before anything else on the page. The count is in the label so the
     # collapsed state still says what is in there.
+    # Open once the week is under way, collapsed before it. An upcoming slate
+    # is reference material you scroll past; a live one is the reason the page
+    # is open.
+    week_started = any(game["status"] != "pre" for game in data["games"])
     plural = "game" if len(cards) == 1 else "games"
     with st.expander(f"Week {week} scoreboard - {len(cards)} {plural}",
-                     expanded=True):
-        if not reveal_picks:
-            st.caption(
-                "This week hasn't kicked off - showing the full slate. Pick "
-                "counts appear once the games start."
-            )
+                     expanded=week_started):
+        if not week_started:
+            st.caption("This week hasn't kicked off yet.")
         elif not any(card["has_picks"] for card in cards):
             st.caption("No picks in yet - showing every game this week.")
 

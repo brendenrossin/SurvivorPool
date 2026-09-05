@@ -118,6 +118,11 @@ class TestBuildScoreboard:
 class TestShouldRevealPicks:
     """The wiring-level leak, which the build_scoreboard tests could not catch.
 
+    These pass picks_are_public=False explicitly: this pool's picks are public
+    by its own process (see docs/pool-process.md), so the gate is off in
+    production. The logic is still exercised here because it is what protects a
+    pool that collects picks privately.
+
     reveal_picks was first derived as `scoreboard_week <= played_week`. That
     ordering holds in exactly the case it most needed to exclude: before any
     game of the season starts, resolve_current_week falls back to the first
@@ -129,23 +134,23 @@ class TestShouldRevealPicks:
 
     def test_the_pre_season_case_that_shipped_broken(self):
         """2026 as it stands today: picks in for week 1, nothing kicked off."""
-        assert should_reveal_picks(1, []) is False
+        assert should_reveal_picks(1, [], picks_are_public=False) is False
 
     def test_a_week_that_has_kicked_off_reveals(self):
-        assert should_reveal_picks(5, [1, 2, 3, 4, 5]) is True
+        assert should_reveal_picks(5, [1, 2, 3, 4, 5], picks_are_public=False) is True
 
     def test_a_rolled_forward_week_does_not_reveal(self):
         """Tuesday of week 6: weeks 1-5 played, the scoreboard shows week 6."""
-        assert should_reveal_picks(6, [1, 2, 3, 4, 5]) is False
+        assert should_reveal_picks(6, [1, 2, 3, 4, 5], picks_are_public=False) is False
 
     def test_a_pool_starting_after_week_one_does_not_reveal(self):
         """The other resolve_current_week fallback: picks start at week 5 while
         the NFL has already played 1-4, so played_week is 5 and the old
         comparison passed despite week 5 not having started."""
-        assert should_reveal_picks(5, [1, 2, 3, 4]) is False
+        assert should_reveal_picks(5, [1, 2, 3, 4], picks_are_public=False) is False
 
     def test_no_games_started_at_all(self):
-        assert should_reveal_picks(1, []) is False
+        assert should_reveal_picks(1, [], picks_are_public=False) is False
 
 
 class TestSortingAndTimestamps:
@@ -213,10 +218,13 @@ class TestScoreboardIsCollapsible:
     def test_cards_render_inside_an_expander(self):
         assert "st.expander(" in self.SRC
 
-    def test_it_opens_expanded(self):
-        # Collapsed by default would hide live scores during games, which is
-        # the one time this widget is the reason to open the page.
-        assert "expanded=True" in self.SRC
+    def test_it_opens_once_the_week_is_under_way(self):
+        # An upcoming slate is reference material you scroll past; a live one
+        # is the reason the page is open.
+        assert "expanded=week_started" in self.SRC
+
+    def test_week_started_is_derived_from_game_status(self):
+        assert 'week_started = any(game["status"] != "pre"' in self.SRC
 
     def test_the_label_carries_the_game_count(self):
         # So the collapsed state still says what is in there
@@ -232,3 +240,36 @@ class TestScoreboardIsCollapsible:
         for message in ("No week {week} schedule yet",
                         "No week {week} game features a picked team"):
             assert self.SRC.index(message) < expander_at
+
+
+class TestPublicPicksPolicy:
+    """This pool posts picks to a GroupMe before the manager aggregates them,
+    so they are public well before kickoff and the scoreboard has nothing to
+    disclose. See docs/pool-process.md.
+
+    The gate is kept rather than deleted so a pool that collects picks
+    privately gets the pre-kickoff protections back by flipping one flag.
+    """
+
+    def test_public_picks_reveal_before_kickoff(self):
+        from app.live_scores import should_reveal_picks
+        assert should_reveal_picks(1, [], picks_are_public=True) is True
+
+    def test_public_picks_reveal_for_a_rolled_forward_week(self):
+        from app.live_scores import should_reveal_picks
+        assert should_reveal_picks(6, [1, 2, 3, 4, 5], picks_are_public=True) is True
+
+    def test_the_flag_defaults_to_this_pool(self):
+        from app.live_scores import PICKS_ARE_PUBLIC, should_reveal_picks
+        assert PICKS_ARE_PUBLIC is True
+        assert should_reveal_picks(1, []) is True
+
+    def test_turning_the_flag_off_restores_the_gate(self):
+        from app.live_scores import should_reveal_picks
+        assert should_reveal_picks(1, [], picks_are_public=False) is False
+
+    def test_the_process_is_documented(self):
+        import pathlib
+        doc = pathlib.Path("docs/pool-process.md")
+        assert doc.is_file(), "docs/pool-process.md explains why the gate is off"
+        assert "GroupMe" in doc.read_text()
