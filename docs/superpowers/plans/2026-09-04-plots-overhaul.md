@@ -677,7 +677,7 @@ git commit -m "Add cached get_attrition_series, replacing the per-week loop"
 - Test: `tests/test_dashboard_data.py` (append)
 
 **Interfaces:**
-- Produces: `rank_doom_teams(rows: List[Tuple[str, int, int]]) -> List[Dict]` (pure); `get_doom_teams(season: int) -> List[Dict]` with keys `team`, `eliminations`, `worst_week`; `get_graveyard(season: int) -> List[Dict]` with keys `player`, `week`, `team`, `opponent`, `location`, `margin`, `final_score`, `game_summary`
+- Produces: `rank_doom_teams(rows: List[Tuple[str, int, int]]) -> List[Dict]` (pure); `get_doom_teams(season: int) -> List[Dict]` with keys `team`, `eliminations`, `first_week`; `get_graveyard(season: int) -> List[Dict]` with keys `player`, `week`, `team`, `opponent`, `location`, `margin`, `final_score`, `game_summary`
 
 `get_doom_teams` uses **first-elimination** attribution (`MIN(week)` per player),
 matching the graveyard. The old `team_of_doom.py` counted every losing pick. In 2025
@@ -700,9 +700,9 @@ class TestRankDoomTeams:
         out = rank_doom_teams([("MIN", 3, 2), ("PIT", 3, 4), ("NE", 3, 1)])
         assert [t["team"] for t in out] == ["MIN", "NE", "PIT"]
 
-    def test_carries_the_worst_week_through(self):
+    def test_carries_the_first_week_through(self):
         out = rank_doom_teams([("GB", 73, 3)])
-        assert out[0]["worst_week"] == 3
+        assert out[0]["first_week"] == 3
 
     def test_drops_null_team_rows(self):
         # A missed pick has team_abbr NULL. It eliminates players but it is not
@@ -736,7 +736,7 @@ def _first_elimination_subquery(db, season):
 
 
 def rank_doom_teams(rows):
-    """Order (team, eliminations, worst_week) triples for display.
+    """Order (team, eliminations, first_week) triples for display.
 
     Rows with a null team are dropped: a missed pick eliminates a player but is
     not a team, and in 2025 there are 233 of them - they would top the ranking
@@ -745,7 +745,7 @@ def rank_doom_teams(rows):
     cleaned = [r for r in rows if r[0]]
     cleaned.sort(key=lambda r: (-r[1], r[0]))
     return [
-        {"team": team, "eliminations": n, "worst_week": worst}
+        {"team": team, "eliminations": n, "first_week": worst}
         for team, n, worst in cleaned
     ]
 
@@ -760,7 +760,7 @@ def get_doom_teams(season: int):
         rows = db.query(
             Pick.team_abbr,
             func.count(func.distinct(Pick.player_id)).label("n"),
-            func.min(Pick.week).label("worst_week"),
+            func.min(Pick.week).label("first_week"),
         ).join(
             first,
             (Pick.player_id == first.c.player_id) & (Pick.week == first.c.week),
@@ -1518,8 +1518,8 @@ class TestNoEmoji:
 
 class TestDoomFigure:
     ROWS = [
-        {"team": "GB", "eliminations": 73, "worst_week": 3},
-        {"team": "LAC", "eliminations": 32, "worst_week": 5},
+        {"team": "GB", "eliminations": 73, "first_week": 3},
+        {"team": "LAC", "eliminations": 32, "first_week": 5},
     ]
 
     def test_one_bar_per_team(self):
@@ -1534,7 +1534,7 @@ class TestDoomFigure:
 
     def test_unknown_team_gets_a_fallback_not_a_crash(self):
         fig = build_doom_figure([{"team": "ZZZ", "eliminations": 1,
-                                  "worst_week": 1}], {})
+                                  "first_week": 1}], {})
         assert len(fig.data[0].x) == 1
 
     def test_empty_rows_gives_an_empty_figure(self):
@@ -2081,7 +2081,7 @@ rule → Tasks 7, 8, 9, verified in Task 10. Blast radius → Task 2 (mine); the
 **Type consistency:** `contrast_fill(color, background, target)` used identically in
 Tasks 1, 2, 8. Attrition row keys (`week`, `entering`, `eliminated`, `remaining`,
 `pct_out`) identical in Tasks 3, 6, 8, 9. Doom row keys (`team`, `eliminations`,
-`worst_week`) identical in Tasks 4, 8. `render_*(season)` signature consistent in
+`first_week`) identical in Tasks 4, 8. `render_*(season)` signature consistent in
 Tasks 8 and 9.
 
 **Known gap, deliberate:** Task 9 leaves the live-scores `SessionLocal()` block in

@@ -12,7 +12,7 @@ try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
 except ImportError:  # pragma: no cover
     TypedDict = None
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, text, select
+from sqlalchemy import and_, func, or_, select, text
 from datetime import datetime
 
 from api.database import SessionLocal
@@ -199,6 +199,10 @@ def get_player_data(player_name: str, season: int) -> Optional[Dict]:
                 "game_status": game.status if game else "unknown"
             }
             picks.append(pick_data)
+
+        # Rule: never surface a week that has not kicked off. Without this,
+        # "Find a Survivor" publishes the field's upcoming picks.
+        picks = clamp_picks_to_week(picks, _last_started_week(season))
 
         return {
             "player": player_name,
@@ -399,6 +403,272 @@ def get_meme_stats(season: int) -> Dict:
 
     finally:
         db.close()
+
+# --- Attrition, doom and the graveyard -------------------------------------
+#
+# Every widget's database access lives here. The render_* functions are pure
+# view code, so nothing in app/ opens a session on a script run except this
+# module - and everything here is cached.
+
+
+def build_attrition_rows(entrants, elims_by_week, weeks):
+    """Turn {week: first-eliminations} into the field's week-by-week decline.
+
+    Pure, so the arithmetic is testable without a database. `entering` is the
+    field at the start of the week; `remaining` is what survived it.
+    """
+    rows = []
+    alive = entrants
+    for week in sorted(weeks):
+        out = elims_by_week.get(week, 0)
+        entering = alive
+        alive = entering - out
+        rows.append({
+            "week": week,
+            "entering": entering,
+            "eliminated": out,
+            "remaining": alive,
+            "pct_out": round(out / entering * 100, 1) if entering > 0 else 0.0,
+        })
+    return rows
+
+
+def _first_elimination_subquery(db, season):
+    """Each player's first losing week - the graveyard's definition.
+
+    A player who keeps filling in the sheet after going out has later losing
+    picks too; attributing them all would count one elimination many times.
+    """
+    return db.query(
+        Pick.player_id,
+        func.min(Pick.week).label("week"),
+    ).join(
+        PickResult, Pick.pick_id == PickResult.pick_id
+    ).filter(
+        Pick.season == season,
+        PickResult.survived == False,  # noqa: E712
+    ).group_by(Pick.player_id).subquery()
+
+
+def _last_started_week(season):
+    """The last week that has kicked off, or None before the season starts."""
+    started = get_started_game_weeks(season)
+    return max(started) if started else None
+
+
+@st.cache_data(ttl=60)
+def get_attrition_series(season: int):
+    """The field's week-by-week decline, in one query.
+
+    Replaces a three-queries-per-week loop - 42 round trips for 2025's 14
+    weeks - and is the shared spine behind the KPI sparkline, the elimination
+    tracker and the survivors board.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        entrants = count_season_entrants(db, season)
+
+        first = _first_elimination_subquery(db, season)
+        elims = {
+            week: n for week, n in db.query(
+                first.c.week, func.count().label("n")
+            ).group_by(first.c.week).all()
+        }
+
+        weeks = sorted(
+            w[0] for w in
+            db.query(Pick.week).filter(Pick.season == season).distinct().all()
+        )
+
+        # Never project past the last week that kicked off: the sheet holds
+        # picks for unplayed weeks, and a future week would read as a cliff
+        # to zero eliminations.
+        cutoff = _last_started_week(season)
+        if cutoff is not None:
+            weeks = [w for w in weeks if w <= cutoff]
+
+        return build_attrition_rows(entrants, elims, weeks)
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+def rank_doom_teams(rows):
+    """Order (team, eliminations, first_week) triples for display.
+
+    `first_week` is the earliest week this team ended anyone's run - not the
+    team's worst week. TB's is 14 because that is when it first eliminated
+    someone, which is a different fact from where it did the most damage.
+
+    Null-team rows are dropped: a missed pick eliminates a player but is not a
+    team, and 2025 has 233 of them - they would top the ranking and mean
+    nothing. Ties break alphabetically so the order is stable between runs.
+    """
+    cleaned = [r for r in rows if r[0]]
+    cleaned.sort(key=lambda r: (-r[1], r[0]))
+    return [
+        {"team": team, "eliminations": n, "first_week": worst}
+        for team, n, worst in cleaned
+    ]
+
+
+@st.cache_data(ttl=60)
+def get_doom_teams(season: int):
+    """Teams ranked by how many entrants they eliminated.
+
+    First-elimination attributed, matching the graveyard. Counting every
+    losing pick answers a different question - how often a team lost while
+    someone had it - which is not what "team of doom" means.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        first = _first_elimination_subquery(db, season)
+        rows = db.query(
+            Pick.team_abbr,
+            func.count(func.distinct(Pick.player_id)).label("n"),
+            func.min(Pick.week).label("first_week"),
+        ).join(
+            first,
+            and_(Pick.player_id == first.c.player_id,
+                 Pick.week == first.c.week),
+        ).filter(
+            Pick.season == season
+        ).group_by(Pick.team_abbr).all()
+        return rank_doom_teams([(t, n, w) for t, n, w in rows])
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=60)
+def get_graveyard(season: int):
+    """Eliminated entrants and the pick that ended them, one row per player."""
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        first = _first_elimination_subquery(db, season)
+        rows = db.query(
+            Player.display_name, Pick.week, Pick.team_abbr,
+            Game.home_team, Game.away_team, Game.home_score, Game.away_score,
+        ).join(
+            Pick, Player.player_id == Pick.player_id
+        ).join(
+            first,
+            and_(Pick.player_id == first.c.player_id,
+                 Pick.week == first.c.week),
+        ).outerjoin(
+            Game,
+            and_(
+                or_(Game.home_team == Pick.team_abbr,
+                    Game.away_team == Pick.team_abbr),
+                Game.week == Pick.week,
+                Game.season == season,
+            ),
+        ).filter(
+            Pick.season == season
+        ).order_by(Pick.week, Player.display_name).all()
+
+        out = []
+        for name, week, team, home, away, home_score, away_score in rows:
+            if team is None:
+                out.append({
+                    "player": name, "week": week, "team": None,
+                    "opponent": None, "location": "", "margin": None,
+                    "final_score": None, "game_summary": "No pick submitted",
+                })
+                continue
+
+            if home == team:
+                opponent, location = away, "vs"
+                theirs, others = home_score, away_score
+            else:
+                opponent, location = home, "at"
+                theirs, others = away_score, home_score
+
+            scored = theirs is not None and others is not None
+            out.append({
+                "player": name, "week": week, "team": team,
+                "opponent": opponent, "location": location,
+                "margin": (others - theirs) if scored else None,
+                "final_score": f"{theirs}-{others}" if scored else None,
+                "game_summary": f"{team} {location} {opponent}"
+                                if opponent else team,
+            })
+        return out
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=60)
+def get_survivor_board(season: int):
+    """Every still-alive entrant with their pick history, in one query.
+
+    Replaces a loop of 2N + 2 round trips. It also starts from this season's
+    picks rather than the players table, which is season-independent - a query
+    that starts from Player counts everyone who ever entered the pool.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        eliminated = db.query(Pick.player_id).join(
+            PickResult, Pick.pick_id == PickResult.pick_id
+        ).filter(
+            Pick.season == season,
+            PickResult.survived == False,  # noqa: E712
+        ).distinct().subquery()
+
+        query = db.query(
+            Player.display_name, Pick.week, Pick.team_abbr,
+        ).join(
+            Pick, Player.player_id == Pick.player_id
+        ).filter(
+            Pick.season == season,
+            ~Player.player_id.in_(select(eliminated.c.player_id)),
+        )
+
+        cutoff = _last_started_week(season)
+        if cutoff is not None:
+            query = query.filter(Pick.week <= cutoff)
+
+        board = {}
+        for name, week, team in query.order_by(Player.display_name, Pick.week).all():
+            entry = board.setdefault(name, {
+                "player": name, "picks": 0, "teams_used": [],
+                "latest_week": 0, "latest_team": None,
+            })
+            entry["picks"] += 1
+            if team:
+                entry["teams_used"].append(team)
+            if week >= entry["latest_week"]:
+                entry["latest_week"], entry["latest_team"] = week, team
+        return list(board.values())
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+def clamp_picks_to_week(picks, current_week):
+    """Drop picks for weeks that have not kicked off.
+
+    The sheet holds future weeks' picks from day one, so returning them
+    publishes the field's upcoming picks - the leak the picks grid exists to
+    prevent. `None` means no clamp is known and the caller gets everything.
+    """
+    if current_week is None:
+        return picks
+    return [p for p in picks if p["week"] <= current_week]
+
 
 @st.cache_data(ttl=300)  # 5 minute cache for player searches
 def search_players(query: str, season: int) -> List[str]:
