@@ -154,6 +154,49 @@ def test_error_body_is_included_for_the_operator(monkeypatch):
     assert "unauthorized" in str(err.value)
 
 
+def test_only_groupmes_structured_error_fields_reach_the_message(monkeypatch):
+    """The diagnostic value is entirely in meta.code and meta.errors. The rest
+    is external free text on a path that runs only when something has already
+    gone wrong, and it would land in job_meta.message and Railway's logs."""
+    body = ('{"meta":{"code":404,"errors":["group not found"]},'
+            '"response":{"trace":"kubelet-7f3a","note":"contact support"}}')
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(404, text=body))
+
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+
+    message = str(err.value)
+    assert "group not found" in message
+    assert "404" in message
+    assert "kubelet-7f3a" not in message
+    assert "contact support" not in message
+    assert "response" not in message
+
+
+def test_a_non_json_body_still_reaches_the_operator(monkeypatch):
+    """An HTML error page from a proxy is itself the diagnosis - discarding it
+    would leave a bare status code and nothing to act on."""
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(
+                            502, text="<html><title>502 Bad Gateway</title></html>"))
+
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+
+    assert "Bad Gateway" in str(err.value)
+
+
+def test_a_json_body_without_groupmes_shape_falls_back_to_raw_text(monkeypatch):
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(400, text='{"oops":"malformed request"}'))
+
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+
+    assert "malformed request" in str(err.value)
+
+
 def test_a_token_echoed_in_an_error_body_is_redacted(monkeypatch):
     """An API echoing the credential back is exactly how a body leaks a secret."""
     secret = "super-secret-token-value"
@@ -164,6 +207,30 @@ def test_a_token_echoed_in_an_error_body_is_redacted(monkeypatch):
         groupme.fetch_message_page("g1", secret)
     assert secret not in str(err.value)
     assert "REDACTED" in str(err.value)
+
+
+def test_a_token_echoed_inside_the_structured_error_is_redacted(monkeypatch):
+    """Redaction applies on the structured path too - meta.errors is still text
+    an external service wrote."""
+    secret = "super-secret-token-value"
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(
+                            401, text=f'{{"meta":{{"code":401,"errors":["bad token {secret}"]}}}}'))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", secret)
+    assert secret not in str(err.value)
+    assert "REDACTED" in str(err.value)
+
+
+def test_a_token_split_by_the_length_cap_cannot_survive(monkeypatch):
+    """Truncating before redacting would leave the token's prefix behind."""
+    secret = "super-secret-token-value"
+    filler = "x" * (groupme.ERROR_BODY_LIMIT - 4)
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(500, text=filler + secret))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", secret)
+    assert secret[:8] not in str(err.value)
 
 
 def test_error_body_is_capped(monkeypatch):

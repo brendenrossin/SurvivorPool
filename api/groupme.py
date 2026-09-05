@@ -16,6 +16,7 @@ unsupported, reverting to a `token` query param is a one-line change; the
 redaction layer still protects logs from leaked secrets either way.
 """
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -145,23 +146,80 @@ def _redact(text: str, token: str) -> str:
     return text.replace(token, "***REDACTED***") if token else text
 
 
+def _response_text(resp) -> str:
+    try:
+        return getattr(resp, "text", "") or ""
+    except Exception:
+        return ""
+
+
+def _clip(text: str, token: str) -> str:
+    """Redact first, then truncate.
+
+    Order matters: truncating first can slice a token in half and leave the
+    prefix behind, which redaction would then no longer recognise.
+    """
+    return _redact(text, token)[:ERROR_BODY_LIMIT].strip()
+
+
+def _meta_error(body: str) -> Optional[str]:
+    """GroupMe's documented error shape, or None if the body is not one.
+
+    GroupMe answers a failure with {"meta": {"code": 401, "errors": [...]}}.
+    Those two fields hold the entire diagnostic value of the response; the rest
+    is free text from an external service that we would otherwise be writing
+    verbatim into job_meta.message and Railway's hosted logs.
+    """
+    try:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
+        return None
+
+    meta = payload.get("meta") if isinstance(payload, dict) else None
+    if not isinstance(meta, dict):
+        return None
+
+    raw_errors = meta.get("errors")
+    if isinstance(raw_errors, str):
+        raw_errors = [raw_errors]
+    if not isinstance(raw_errors, list):
+        return None
+
+    errors = [str(e) for e in raw_errors if isinstance(e, (str, int, float))]
+    if not errors:
+        return None
+
+    detail = "; ".join(errors)
+    code = meta.get("code")
+    if isinstance(code, int):
+        detail = f"{detail} (meta.code {code})"
+    return detail
+
+
 def _error_detail(resp, token: str) -> str:
     """A failing response as an operator-readable, redacted one-liner.
 
     The status code alone cannot distinguish a revoked token from a bad group
     id from a rejected auth scheme - all of which are live possibilities while
-    header auth is unverified - so a short slice of the body comes along. It is
-    run through the same redaction as every other outbound string, because an
+    header auth is unverified - so the body's diagnosis comes along.
+
+    Preferably only the diagnosis: when the body is GroupMe's documented error
+    envelope, this carries its meta.errors and meta.code and nothing else,
+    because everything else in there is external free text on a path that runs
+    only when something has already gone wrong. A body that is not that shape
+    falls back to a capped slice of the raw text, since an HTML page from some
+    proxy is itself the diagnosis. Both paths are redacted and capped - an
     error body is one of the places an API is most likely to echo a credential
     back at you.
     """
-    try:
-        body = getattr(resp, "text", "") or ""
-    except Exception:
-        body = ""
-    body = _redact(body[:ERROR_BODY_LIMIT], token).strip()
-
+    body = _response_text(resp)
     detail = f"GroupMe returned HTTP {resp.status_code}"
+
+    structured = _meta_error(body)
+    if structured is not None:
+        return f"{detail}: {_clip(structured, token)}"
+
+    body = _clip(body, token)
     return f"{detail}: {body}" if body else detail
 
 
