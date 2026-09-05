@@ -133,6 +133,22 @@ contrast.
 Blocking findings were fixed on the branch (see `5585f4c`). These were verified
 by the reviewers but deliberately not applied, with the reason for each.
 
+### Owner ruling on the future-pick leaks (2026-09-04)
+
+**The pool does not in practice hold picks for future weeks**, so none of the
+disclosures below is an active concern. The owner's words: *"we're never going
+to have picks for future weeks really so none of that is a concern, although
+good to have those guards in there in case this evolves."*
+
+The guards stay — they are cheap, tested, and are what makes the property hold
+if the workflow ever changes — but treat everything in the next section as
+**defence in depth, not an incident**. Note the historical record disagrees
+slightly: `docs/design/picks-grid-spec.md` asserts 2025's weeks were "populated
+from day one", while the production counts decline week over week (252, 252,
+246, 237, 170, …), which is the shape of picks accumulating as the season runs
+rather than of a pre-filled sheet. Worth settling before anyone re-prioritises
+these on the strength of that sentence.
+
 ### Pre-existing leaks of the same class this branch hardened
 
 - **`get_player_data` returns every pick for the season with no week clamp.**
@@ -141,8 +157,9 @@ by the reviewers but deliberately not applied, with the reason for each.
   and scoreboard guard, and it bypasses both because it never passes through
   `aggregate_picks` or `build_scoreboard`. The `⏳` status branch in
   `render_player_search` exists precisely to render an unplayed week's team.
-  **Not this branch's regression and not in its files**, but the branch's stated
-  security property is not actually met while this stands. Fix: clamp in
+  **Not this branch's regression and not in its files.** Low priority per the
+  owner ruling above — it is the largest of the theoretical leaks, and the one
+  to fix first if the pool ever starts collecting picks ahead. Fix: clamp in
   `get_player_data` — null the `team` for any week not in
   `get_started_game_weeks(season)`, keeping the row so the week structure shows.
 
@@ -154,8 +171,8 @@ by the reviewers but deliberately not applied, with the reason for each.
   `build_scoreboard` so a card still `pre` shows no counts and is exempt from
   the picked-teams filter. **This changes approved behaviour** (the owner signed
   off on picked-teams-only with counts for a live week), so it needs a ruling
-  rather than a patch. Related: the entry above this section, which was already
-  open.
+  rather than a patch — and per the owner ruling above there is no pressure to
+  seek one.
 
 - **Sheet-controlled `team_abbr` reaches Plotly's HTML subset unvalidated.**
   `parse_picks_data` does not validate against `db/seed_team_map.json` despite
