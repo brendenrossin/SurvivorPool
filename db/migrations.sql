@@ -60,6 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_picks_season_week ON picks(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_season_week ON games(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_pick_results_survived ON pick_results(survived);
+
 -- GroupMe chat history, source of the recap bot's voice corpus
 CREATE TABLE IF NOT EXISTS chat_messages (
     message_id TEXT PRIMARY KEY,

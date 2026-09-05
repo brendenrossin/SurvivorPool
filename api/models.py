@@ -64,6 +64,7 @@ class JobMeta(Base):
     last_run_at = Column(DateTime(timezone=True))
     status = Column(String)
     message = Column(Text)
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
