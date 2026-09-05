@@ -31,6 +31,19 @@ def db():
 
 
 @pytest.fixture
+def job_db(db, monkeypatch):
+    """A session the jobs will not close, with GroupMe credentials stubbed."""
+    from jobs import backfill_groupme, ingest_groupme
+
+    monkeypatch.setattr(db, "close", lambda: None)
+    monkeypatch.setattr(ingest_groupme, "SessionLocal", lambda: db)
+    monkeypatch.setattr(backfill_groupme, "SessionLocal", lambda: db)
+    monkeypatch.setenv("GROUPME_ACCESS_TOKEN", "tok")
+    monkeypatch.setenv("GROUPME_READ_GROUP_ID", "g1")
+    return db
+
+
+@pytest.fixture
 def seeded_db(db):
     """Two seasons of history: a 2025-only player and a two-season player."""
     alumni = Player(display_name="Alumni Only 2025")

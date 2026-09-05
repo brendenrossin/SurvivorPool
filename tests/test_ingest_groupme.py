@@ -14,15 +14,6 @@ from api.models import ChatMessage, JobMeta
 from jobs import ingest_groupme
 
 
-@pytest.fixture
-def job_db(db, monkeypatch):
-    monkeypatch.setattr(db, "close", lambda: None)
-    monkeypatch.setattr(ingest_groupme, "SessionLocal", lambda: db)
-    monkeypatch.setenv("GROUPME_ACCESS_TOKEN", "tok")
-    monkeypatch.setenv("GROUPME_READ_GROUP_ID", "g1")
-    return db
-
-
 def raw(mid, favs=0, created=None):
     # `created` defaults to "now" rather than a fixed epoch: run()'s trailing
     # window filters against the real wall clock, so a hardcoded timestamp
