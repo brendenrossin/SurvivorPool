@@ -46,3 +46,31 @@ def test_system_messages_are_storable(db):
     ))
     db.commit()
     assert db.query(ChatMessage).filter_by(is_system=True).count() == 1
+
+
+def test_the_corpus_index_matches_the_migration_sql():
+    """Tests build this schema from api/models.py on SQLite; production builds
+    it from db/migrations.sql on Postgres. Nothing else compares the two, so an
+    index added to one and not the other is invisible until a slow query.
+    """
+    import re
+    from pathlib import Path
+
+    from api.models import ChatMessage
+
+    index = {ix.name: ix for ix in ChatMessage.__table__.indexes}["idx_chat_messages_corpus"]
+    predicate = str(index.dialect_options["postgresql"]["where"])
+
+    sql = Path(__file__).resolve().parent.parent.joinpath("db/migrations.sql").read_text()
+    declared = re.search(
+        r"CREATE INDEX IF NOT EXISTS idx_chat_messages_corpus\s+"
+        r"ON chat_messages \((?P<cols>[^)]*)\)\s+WHERE (?P<where>[^;]+);", sql)
+
+    assert declared, "idx_chat_messages_corpus is missing from db/migrations.sql"
+    assert declared.group("cols").strip() == "favorite_count DESC, created_at"
+    assert declared.group("where").strip() == predicate
+
+    # The two single-column indexes this replaced served neither the filter nor
+    # the sort of the corpus query fully.
+    assert "idx_chat_messages_favorites ON" not in sql
+    assert "idx_chat_messages_created_at ON" not in sql

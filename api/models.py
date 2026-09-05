@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Float, Index
+from sqlalchemy import text as sql_text   # `text` is also a column name below
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from api.database import Base
@@ -77,3 +78,17 @@ class ChatMessage(Base):
     favorite_count = Column(Integer, nullable=False, default=0)
     is_system = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False)
+
+    # The corpus read is a single shape: the most-liked human messages before a
+    # cutoff. Two independent single-column indexes could serve either the
+    # filter or the sort but never both from one scan, and `sender_type != 'bot'`
+    # is an inequality a plain btree cannot seek on at all. Baking the fixed
+    # predicates into a partial index leaves exactly that query's rows, already
+    # in its sort order. Must stay identical to idx_chat_messages_corpus in
+    # db/migrations.sql - tests build the schema from here on SQLite, production
+    # builds it from the .sql on Postgres.
+    __table_args__ = (
+        Index("idx_chat_messages_corpus",
+              favorite_count.desc(), "created_at",
+              postgresql_where=sql_text("is_system = false AND sender_type != 'bot'")),
+    )

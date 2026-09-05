@@ -74,6 +74,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TIMESTAMPTZ NOT NULL
 );
 
--- corpus reads are "most-liked, before a cutoff"
-CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_favorites ON chat_messages(favorite_count DESC);
+-- Corpus reads are one shape: most-liked human messages before a cutoff.
+-- A partial index over the fixed predicates serves the filter AND the sort from
+-- a single scan; the two single-column indexes this replaced served neither
+-- fully, and sender_type != 'bot' is an inequality a plain btree cannot seek on.
+-- Must stay identical to ChatMessage.__table_args__ in api/models.py.
+DROP INDEX IF EXISTS idx_chat_messages_created_at;
+DROP INDEX IF EXISTS idx_chat_messages_favorites;
+CREATE INDEX IF NOT EXISTS idx_chat_messages_corpus
+    ON chat_messages (favorite_count DESC, created_at)
+    WHERE is_system = false AND sender_type != 'bot';
