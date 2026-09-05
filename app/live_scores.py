@@ -11,10 +11,13 @@ Data comes from the database only. API calls happen in the cron jobs.
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+import html
+
 import pytz
 import streamlit as st
 
-from app.dashboard_data import get_week_scoreboard
+from app.dashboard_data import get_week_scoreboard, load_team_data
+from app.theme import INK_MUTED, SURFACE, contrast_fill
 from app.odds_helpers import format_pregame_line
 
 CARDS_PER_ROW = 4
@@ -163,62 +166,94 @@ def build_scoreboard(
     return cards
 
 
-def _status_chip(card: Dict[str, Any]) -> None:
-    """Status as a badge. st.badge's colours are theme tokens, not literals."""
+def _status_html(card: Dict[str, Any]) -> str:
+    """Kickoff time, or the game's state once it has one."""
     if card["status"] == "in":
-        st.badge("LIVE", icon="🔴", color="red")
-    elif card["status"] == "final":
-        st.badge("FINAL", color="gray")
-    elif card["kickoff"]:
+        return '<span class="sb-live"><span class="sb-pulse"></span>LIVE</span>'
+    if card["status"] == "final":
+        return '<span class="sb-when">FINAL</span>'
+    if card["kickoff"]:
         local = _as_utc(card["kickoff"]).astimezone(PACIFIC)
-        st.badge(local.strftime("%a %-I:%M %p"), icon="🕐", color="gray")
-    else:
-        st.badge("TBD", color="gray")
+        return f'<span class="sb-when">{local.strftime("%a %-I:%M %p")}</span>'
+    return '<span class="sb-when">TBD</span>'
 
 
-def _team_row(side: Dict[str, Any], status: str) -> None:
-    name, score = st.columns([3, 1], vertical_alignment="center")
-    with name:
-        weight = "**" if side["outcome"] == "won" else ""
-        label = f"{weight}{side['team']}{weight}"
-        if side["picks"]:
-            entries = "entry" if side["picks"] == 1 else "entries"
-            label += f" &nbsp;`{side['picks']} {entries}`"
-        st.markdown(label)
-    with score:
-        if status == "pre" or side["score"] is None:
-            st.markdown("&nbsp;")
-        else:
-            weight = "**" if side["outcome"] == "won" else ""
-            st.markdown(f"{weight}{side['score']}{weight}")
+def _team_html(side: Dict[str, Any], status: str, color: str) -> str:
+    """One team's line: colour bar, abbreviation, pick count, score.
+
+    The count sits in a pill next to the name rather than as text, so it never
+    reads as part of the score at the other end of the row. Both teams get one
+    when both were picked - rare, but it happened twice in 2025.
+    """
+    team = html.escape(side["team"])
+    state = f" {side['outcome']}" if side["outcome"] else ""
+
+    picks = ""
+    if side["picks"]:
+        entries = "entry" if side["picks"] == 1 else "entries"
+        picks = (f'<span class="sb-picks" title="{side["picks"]} {entries}">'
+                 f'{side["picks"]}</span>')
+
+    score = ""
+    if status != "pre" and side["score"] is not None:
+        score = f'<span class="sb-score{state}">{side["score"]}</span>'
+
+    return (
+        f'<div class="sb-row">'
+        f'<span class="sb-bar" style="background:{color}"></span>'
+        f'<span class="sb-team{state}">{team}</span>'
+        f'{picks}<span class="sb-gap"></span>{score}'
+        f'</div>'
+    )
 
 
-def _render_card(card: Dict[str, Any]) -> None:
-    with st.container(border=True):
-        head, line = st.columns([3, 2], vertical_alignment="center")
-        with head:
-            _status_chip(card)
-        with line:
-            if card["line"]:
-                st.caption(card["line"])
+def _card_html(card: Dict[str, Any], colors: Dict[str, str]) -> str:
+    """A whole card as one block.
 
-        _team_row(card["away"], card["status"])
-        _team_row(card["home"], card["status"])
+    One markdown call rather than nested st.columns: the cards sit four to a
+    row now, and each Streamlit block added vertical padding the card could not
+    spare.
+    """
+    line = (f'<span class="sb-line">{html.escape(card["line"])}</span>'
+            if card["line"] else "")
 
-        # The survivor angle, and the reason this isn't just a scoreboard.
-        if card["eliminated"] or card["survived"]:
-            if card["eliminated"]:
-                st.badge(f"{card['eliminated']} eliminated", icon="💀", color="red")
-            if card["survived"]:
-                st.badge(f"{card['survived']} survive", icon="✅", color="green")
+    foot = []
+    if card["eliminated"]:
+        foot.append(f'<span class="sb-out">{card["eliminated"]} out</span>')
+    if card["survived"]:
+        foot.append(f'<span class="sb-through">{card["survived"]} through</span>')
+    footer = (f'<div class="sb-foot">{" ".join(foot)}</div>') if foot else ""
+
+    return (
+        f'<div class="sb-card">'
+        f'<div class="sb-meta">{_status_html(card)}{line}</div>'
+        f'{_team_html(card["away"], card["status"], _dot(card["away"]["team"], colors))}'
+        f'{_team_html(card["home"], card["status"], _dot(card["home"]["team"], colors))}'
+        f'{footer}'
+        f'</div>'
+    )
+
+
+def _dot(team: str, colors: Dict[str, str]) -> str:
+    """A team's colour, lifted to clear the surface.
+
+    The bar is a small mark floating on the surface with no border, so it is
+    the contrast_fill case: GB #203731 is 1.47:1 on the dark surface untreated.
+    """
+    return contrast_fill(colors.get(team, INK_MUTED), SURFACE)
+
+
+def _render_card(card: Dict[str, Any], colors: Dict[str, str]) -> None:
+    st.markdown(_card_html(card, colors), unsafe_allow_html=True)
 
 
 def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> None:
     """The week's scoreboard, as a grid of cards.
 
-    Built only from st.container(border=True) and st.badge, whose colours are
-    theme tokens. There are deliberately no colour literals in this module, so
-    it follows the app's surface wherever that lands.
+    Cards are one markdown block each, styled by the .sb-* rules in
+    app/theme.py. Every colour comes from a theme token or from a team colour
+    passed through contrast_fill - there are no colour literals in this module,
+    so it follows the app's surface wherever that lands.
     """
     data = get_week_scoreboard(season, week)
     cards = build_scoreboard(
@@ -251,6 +286,8 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
     # is reference material you scroll past; a live one is the reason the page
     # is open.
     week_started = any(game["status"] != "pre" for game in data["games"])
+    colors = {team: entry.get("color", INK_MUTED)
+              for team, entry in load_team_data()["teams"].items()}
     plural = "game" if len(cards) == 1 else "games"
     with st.expander(f"Week {week} scoreboard - {len(cards)} {plural}",
                      expanded=week_started):
@@ -263,4 +300,4 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
             columns = st.columns(CARDS_PER_ROW, gap="small")
             for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
                 with column:
-                    _render_card(card)
+                    _render_card(card, colors)

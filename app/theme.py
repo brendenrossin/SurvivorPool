@@ -138,11 +138,67 @@ h1 {{ font-weight: 800; font-size: 1.9rem; }}
 
 .js-plotly-plot, .stPlotlyChart {{ border-radius: 12px; overflow: hidden; }}
 
-/* Scoreboard cards. Only the live-scores widget uses a bordered container,
-   and four to a row leaves each one narrow, so the default padding is most of
-   the card. */
-[data-testid="stVerticalBlockBorderWrapper"] > div {{ padding: .55rem .7rem; }}
-[data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 10px; }}
-[data-testid="stVerticalBlockBorderWrapper"] p {{ margin-bottom: .15rem; }}
+/* Scoreboard cards. Four to a row leaves each one narrow, so every rule here
+   is about spending that width on the two things the card is for: which teams,
+   and how many entrants are on them. */
+.sb-card {{
+  background: {SURFACE_RAISED};
+  border: 1px solid {BORDER};
+  border-radius: 10px;
+  padding: .5rem .6rem .45rem;
+}}
+.sb-meta {{
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: .4rem; margin-bottom: .35rem;
+}}
+.sb-when, .sb-line {{
+  font-size: .66rem; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: {INK_MUTED}; white-space: nowrap;
+}}
+.sb-live {{
+  display: inline-flex; align-items: center; gap: .28rem;
+  font-size: .66rem; font-weight: 700; letter-spacing: .09em; color: {DANGER};
+}}
+.sb-pulse {{
+  width: 6px; height: 6px; border-radius: 999px; background: {DANGER};
+  animation: sbpulse 1.8s infinite;
+}}
+@keyframes sbpulse {{
+  0%   {{ box-shadow: 0 0 0 0 {DANGER}; opacity: 1; }}
+  70%  {{ box-shadow: 0 0 0 6px rgba(0,0,0,0); opacity: .65; }}
+  100% {{ box-shadow: 0 0 0 0 rgba(0,0,0,0); opacity: 1; }}
+}}
+
+.sb-row {{ display: flex; align-items: center; gap: .4rem; padding: .11rem 0; }}
+.sb-bar {{ width: 3px; height: 15px; border-radius: 2px; flex: none; }}
+.sb-team {{
+  font-size: .92rem; font-weight: 600; color: {INK}; letter-spacing: .01em;
+}}
+.sb-team.won {{ font-weight: 800; }}
+.sb-team.lost {{ color: {INK_MUTED}; font-weight: 500; }}
+.sb-gap {{ flex: 1 1 auto; }}
+
+/* The count sits beside the name, not at the score end, so it never reads as
+   part of the score. */
+.sb-picks {{
+  font-size: .66rem; font-weight: 700; line-height: 1;
+  padding: .16rem .32rem; border-radius: 5px;
+  color: {ACCENT}; border: 1px solid {ACCENT}; flex: none;
+}}
+.sb-score {{
+  font-size: .92rem; font-weight: 600; color: {INK};
+  font-variant-numeric: tabular-nums; flex: none;
+}}
+.sb-score.won {{ font-weight: 800; }}
+.sb-score.lost {{ color: {INK_MUTED}; font-weight: 500; }}
+
+.sb-foot {{
+  display: flex; gap: .45rem; margin-top: .3rem;
+  padding-top: .3rem; border-top: 1px solid {BORDER};
+  font-size: .66rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase;
+}}
+.sb-out {{ color: {DANGER}; }}
+.sb-through {{ color: {WIN}; }}
 </style>
 """

@@ -273,3 +273,79 @@ class TestPublicPicksPolicy:
         doc = pathlib.Path("docs/pool-process.md")
         assert doc.is_file(), "docs/pool-process.md explains why the gate is off"
         assert "GroupMe" in doc.read_text()
+
+
+class TestCardMarkup:
+    """The card is one markdown block now: four to a row leaves it narrow, and
+    every nested Streamlit block spent vertical space it could not spare."""
+
+    COLORS = {"LV": "#000000", "NE": "#002244", "KC": "#E31837"}
+
+    def _card(self, **over):
+        base = {
+            "game_id": "g1", "status": "final", "kickoff": None, "line": None,
+            "away": {"team": "LV", "score": 20, "picks": 1, "outcome": "won"},
+            "home": {"team": "NE", "score": 13, "picks": 3, "outcome": "lost"},
+            "has_picks": True, "eliminated": 3, "survived": 1,
+        }
+        base.update(over)
+        return base
+
+    def test_both_teams_show_their_pick_count(self):
+        # Rare but real: 2025 week 1 had LV 1 at NE 3
+        from app.live_scores import _card_html
+        out = _card_html(self._card(), self.COLORS)
+        assert '<span class="sb-picks" title="1 entry">1</span>' in out
+        assert '<span class="sb-picks" title="3 entries">3</span>' in out
+
+    def test_a_team_with_no_picks_gets_no_pill(self):
+        from app.live_scores import _card_html
+        card = self._card(home={"team": "NE", "score": 13, "picks": 0,
+                                "outcome": "lost"})
+        assert out_count(_card_html(card, self.COLORS)) == 1
+
+    def test_the_pill_is_singular_for_one_entry(self):
+        from app.live_scores import _card_html
+        assert 'title="1 entry"' in _card_html(self._card(), self.COLORS)
+
+    def test_winner_and_loser_are_marked(self):
+        from app.live_scores import _card_html
+        out = _card_html(self._card(), self.COLORS)
+        assert 'class="sb-team won"' in out and 'class="sb-team lost"' in out
+
+    def test_an_unplayed_game_shows_no_score(self):
+        from app.live_scores import _card_html
+        card = self._card(
+            status="pre",
+            away={"team": "LV", "score": None, "picks": 1, "outcome": None},
+            home={"team": "NE", "score": None, "picks": 0, "outcome": None},
+            eliminated=0, survived=0)
+        assert "sb-score" not in _card_html(card, self.COLORS)
+
+    def test_a_live_game_gets_the_pulse(self):
+        from app.live_scores import _card_html
+        assert "sb-pulse" in _card_html(self._card(status="in"), self.COLORS)
+
+    def test_team_colours_are_contrast_corrected(self):
+        # LV #000000 is 1.12:1 on the dark surface; the bar would vanish
+        from app.live_scores import _card_html
+        from app.theme import SURFACE, contrast_ratio
+        import re
+        out = _card_html(self._card(), self.COLORS)
+        for hex_color in re.findall(r'background:(#[0-9a-fA-F]{6})', out):
+            assert contrast_ratio(hex_color, SURFACE) >= 3.0, hex_color
+
+    def test_team_names_are_escaped(self):
+        from app.live_scores import _card_html
+        card = self._card(away={"team": "<img src=x>", "score": 1, "picks": 1,
+                                "outcome": None})
+        assert "<img src=x>" not in _card_html(card, self.COLORS)
+
+    def test_no_survivor_footer_when_nothing_happened(self):
+        from app.live_scores import _card_html
+        card = self._card(eliminated=0, survived=0)
+        assert "sb-foot" not in _card_html(card, self.COLORS)
+
+
+def out_count(markup):
+    return markup.count('class="sb-picks"')
