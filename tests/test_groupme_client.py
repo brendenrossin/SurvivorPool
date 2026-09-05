@@ -53,7 +53,7 @@ def test_iter_messages_pages_backward_until_exhausted(monkeypatch):
     pages = [_page(["5", "4"]), _page(["3", "2"]), None]
     calls = []
 
-    def fake_get(url, params=None, timeout=None):
+    def fake_get(url, params=None, headers=None, timeout=None):
         calls.append(params.get("before_id"))
         nxt = pages.pop(0)
         return FakeResponse(200, nxt) if nxt else FakeResponse(304)
@@ -76,3 +76,33 @@ def test_http_error_raises_groupme_error(monkeypatch):
     monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: FakeResponse(500))
     with pytest.raises(groupme.GroupMeError):
         groupme.fetch_message_page("g1", "tok")
+
+
+def test_token_never_appears_in_a_raised_error(monkeypatch):
+    """A leaked token would be written to job_meta.message and Railway logs."""
+    secret = "super-secret-token-value"
+
+    def boom(*a, **k):
+        raise groupme.requests.RequestException(
+            f"Max retries exceeded with url: /v3/groups/g1/messages?token={secret}")
+
+    monkeypatch.setattr(groupme.requests, "get", boom)
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", secret)
+    assert secret not in str(err.value)
+
+
+def test_token_is_sent_as_a_header_not_a_query_param(monkeypatch):
+    """Keeping the secret out of the URL keeps it out of every log that records one."""
+    seen = {}
+
+    def capture(url, params=None, headers=None, timeout=None):
+        seen["params"] = params
+        seen["headers"] = headers
+        return FakeResponse(200, _page(["1"]))
+
+    monkeypatch.setattr(groupme.requests, "get", capture)
+    groupme.fetch_message_page("g1", "tok")
+
+    assert "token" not in (seen["params"] or {})
+    assert seen["headers"]["X-Access-Token"] == "tok"

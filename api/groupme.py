@@ -7,6 +7,11 @@ GRPM-4 and belongs in a separate function with a separate credential.
 GroupMe pages backward: you pass the oldest id you have seen as `before_id`
 and get the 100 before that, newest-first. The end of history is a 304, not an
 empty list.
+
+Authentication: token is sent as the X-Access-Token header, never in the URL.
+This is confirmed against the live API by scripts/groupme_retention_probe.py.
+If header auth turns out unsupported, reverting to URL params is a one-line
+change; the redaction layer still protects logs from leaked secrets.
 """
 
 from typing import Iterator, Optional
@@ -24,21 +29,32 @@ class GroupMeError(Exception):
     """A GroupMe request failed."""
 
 
+def _redact(text: str, token: str) -> str:
+    """Exception text with the token removed.
+
+    Belt and braces: with header auth the token should never reach a URL, but
+    this must not depend on that staying true. A leaked token would land in
+    job_meta.message and Railway logs.
+    """
+    return text.replace(token, "***REDACTED***") if token else text
+
+
 def fetch_message_page(group_id: str, token: str,
                        before_id: Optional[str] = None,
                        limit: int = PAGE_LIMIT) -> list[dict]:
     """One page of messages, newest first. Empty list at the end of history."""
     get_rate_limiter().wait_if_needed()
 
-    params = {"token": token, "limit": limit}
+    headers = {"X-Access-Token": token}
+    params = {"limit": limit}
     if before_id:
         params["before_id"] = before_id
 
     try:
         resp = requests.get(f"{BASE_URL}/groups/{group_id}/messages",
-                            params=params, timeout=TIMEOUT)
+                            params=params, headers=headers, timeout=TIMEOUT)
     except requests.RequestException as exc:
-        raise GroupMeError(f"GroupMe request failed: {exc}") from exc
+        raise GroupMeError(f"GroupMe request failed: {_redact(str(exc), token)}") from exc
 
     if resp.status_code == 304:
         return []
