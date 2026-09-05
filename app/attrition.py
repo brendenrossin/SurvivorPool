@@ -9,6 +9,7 @@ telling.
 
 import plotly.graph_objects as go
 
+from app.mobile_plotly_config import lock_zoom
 from app.theme import ACCENT, BORDER, DANGER, FONT_STACK, INK, INK_MUTED
 
 # Accent at low alpha. Kept as a literal rather than a token because it is a
@@ -43,7 +44,7 @@ def build_sparkline(rows):
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
     )
-    return fig
+    return lock_zoom(fig)
 
 
 def build_attrition_chart(rows, current_week=None):
@@ -86,7 +87,7 @@ def build_attrition_chart(rows, current_week=None):
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
     )
-    return fig
+    return lock_zoom(fig)
 
 
 def describe_worst_stretch(rows, span=WORST_STRETCH_SPAN):

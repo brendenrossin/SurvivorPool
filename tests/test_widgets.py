@@ -207,3 +207,68 @@ class TestNoUndefinedNames:
             if "undefined name" in line
         ]
         assert not undefined, "\n".join(undefined)
+
+
+class TestChartsCannotBeZoomed:
+    """A drag zooms a Plotly chart by default, and there is no visible way back
+    out: the mode bar carrying the reset is hidden and double-click reset is not
+    discoverable. None of these charts reward zooming, so the axes are pinned
+    rather than the interaction left to be discovered."""
+
+    def _figures(self):
+        from app.attrition import build_attrition_chart, build_sparkline
+        from app.graveyard import build_elimination_bars
+        from app.team_of_doom import build_doom_figure
+        rows = [{"week": 1, "entering": 10, "eliminated": 2,
+                 "remaining": 8, "pct_out": 20.0}]
+        return {
+            "sparkline": build_sparkline(rows),
+            "attrition": build_attrition_chart(rows),
+            "doom": build_doom_figure(
+                [{"team": "GB", "eliminations": 73}], {"GB": "#203731"}),
+            "graveyard": build_elimination_bars(
+                [{"week": 1, "player": "A", "team": "MIA"}]),
+        }
+
+    def test_every_figure_pins_both_axes(self):
+        for name, fig in self._figures().items():
+            assert fig.layout.xaxis.fixedrange is True, name
+            assert fig.layout.yaxis.fixedrange is True, name
+
+    def test_shared_optimization_pins_axes_too(self):
+        import plotly.graph_objects as go
+        from app.mobile_plotly_config import apply_mobile_optimization
+        fig = apply_mobile_optimization(go.Figure(go.Bar(x=[1], y=[1])), "bar_chart")
+        assert fig.layout.xaxis.fixedrange is True
+        assert fig.layout.yaxis.fixedrange is True
+
+    def test_config_does_not_offer_a_reset_that_does_nothing(self):
+        from app.mobile_plotly_config import get_mobile_config
+        config = get_mobile_config()
+        assert config["doubleClick"] is False
+        assert config["scrollZoom"] is False
+
+    def test_hover_survives_the_lock(self):
+        # staticPlot would also disable zoom, but at the cost of tooltips
+        from app.mobile_plotly_config import get_mobile_config
+        assert get_mobile_config()["staticPlot"] is False
+
+    def test_the_picks_grid_is_locked_at_its_call_site(self):
+        # It bypasses render_mobile_chart, so it needs its own pass
+        assert "lock_zoom(fig)" in open("app/main.py").read()
+
+
+class TestScoreboardCardsPerRow:
+    def test_four_cards_to_a_row(self):
+        from app.live_scores import CARDS_PER_ROW
+        assert CARDS_PER_ROW == 4
+
+    def test_the_row_loop_uses_the_constant(self):
+        src = open("app/live_scores.py").read()
+        assert "range(0, len(cards), CARDS_PER_ROW)" in src
+        assert "st.columns(CARDS_PER_ROW" in src
+
+    def test_a_short_final_row_does_not_index_past_the_end(self):
+        # zip() stops at the shorter side; a slice-and-zip cannot IndexError
+        src = open("app/live_scores.py").read()
+        assert "cards[start:start + CARDS_PER_ROW]" in src

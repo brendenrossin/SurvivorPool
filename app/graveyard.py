@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.dashboard_data import get_graveyard
-from app.mobile_plotly_config import get_mobile_config
+from app.mobile_plotly_config import get_mobile_config, lock_zoom
 from app.theme import BORDER, DANGER, FONT_STACK, INK, INK_MUTED
 
 ALL_WEEKS = "All weeks"
@@ -50,7 +50,7 @@ def build_elimination_bars(rows):
         showlegend=False,
         bargap=0.35,
     )
-    return fig
+    return lock_zoom(fig)
 
 
 def _table_rows(rows):

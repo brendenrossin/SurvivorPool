@@ -19,13 +19,14 @@ from app.theme import BORDER, FONT_STACK, INK, INK_MUTED, SURFACE_RAISED
 MOBILE_CONFIG = {
     'displayModeBar': False,
     'displaylogo': False,
-    'doubleClick': 'reset',
+    'doubleClick': False,  # nothing to reset - the axes are locked
     'scrollZoom': False,   # would fight page scroll on a phone
     'responsive': True,
-    'staticPlot': False,
+    'staticPlot': False,   # keep hover; zoom is disabled at the axes instead
 }
 
 _AXIS = {
+    'fixedrange': True,
     'tickfont': {'size': 11, 'color': INK_MUTED},
     'title': {'font': {'size': 11, 'color': INK_MUTED}},
     'gridcolor': BORDER,
@@ -49,6 +50,20 @@ CHART_CONFIGS = {
 }
 
 
+def lock_zoom(fig):
+    """Disable pan and zoom while keeping hover.
+
+    A drag on a touch screen zooms by default and there is no visible way back
+    out - the mode bar that carries the reset is hidden, and double-click reset
+    is not discoverable. None of these charts have detail that rewards zooming,
+    so the axes are pinned instead. staticPlot would also do it, but at the
+    cost of the tooltips.
+    """
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
+    return fig
+
+
 def get_mobile_config():
     """Plotly interaction config, shared by every chart including the grid."""
     return MOBILE_CONFIG
@@ -67,6 +82,7 @@ def get_mobile_layout(chart_type='default'):
 def apply_mobile_optimization(fig, chart_type='default'):
     """Apply the shared layout and a legible tooltip."""
     fig.update_layout(**get_mobile_layout(chart_type))
+    lock_zoom(fig)
     fig.update_traces(
         hoverlabel=dict(
             bgcolor=SURFACE_RAISED,

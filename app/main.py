@@ -61,7 +61,7 @@ from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
-from app.mobile_plotly_config import get_mobile_config
+from app.mobile_plotly_config import get_mobile_config, lock_zoom
 
 # Load environment
 from dotenv import load_dotenv
@@ -334,7 +334,9 @@ def render_weekly_picks_chart(summary):
 
     # Deliberately not render_mobile_chart: CHART_CONFIGS would overwrite the
     # grid's computed height and its axis config with the bar-chart defaults.
-    st.plotly_chart(fig, use_container_width=True, config=get_mobile_config())
+    # It still needs the axes pinned, which that path would have done.
+    st.plotly_chart(lock_zoom(fig), use_container_width=True,
+                    config=get_mobile_config())
 
     # This replaces the "Week N Picks Breakdown" table. The table listed team
     # and count, which the grid already shows in the same order; its only

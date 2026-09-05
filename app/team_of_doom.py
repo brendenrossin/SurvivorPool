@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app.dashboard_data import get_doom_teams, load_team_data
-from app.mobile_plotly_config import get_mobile_config
+from app.mobile_plotly_config import get_mobile_config, lock_zoom
 from app.theme import BORDER, FONT_STACK, INK, INK_MUTED, SURFACE, contrast_fill
 
 TOP_N = 10
@@ -54,7 +54,7 @@ def build_doom_figure(rows, team_colors):
         showlegend=False,
         bargap=0.3,
     )
-    return fig
+    return lock_zoom(fig)
 
 
 def _lead_caption(rows):

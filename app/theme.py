@@ -137,5 +137,12 @@ h1 {{ font-weight: 800; font-size: 1.9rem; }}
 .stTabs [aria-selected="true"] {{ color: {INK}; border-bottom: 2px solid {ACCENT}; }}
 
 .js-plotly-plot, .stPlotlyChart {{ border-radius: 12px; overflow: hidden; }}
+
+/* Scoreboard cards. Only the live-scores widget uses a bordered container,
+   and four to a row leaves each one narrow, so the default padding is most of
+   the card. */
+[data-testid="stVerticalBlockBorderWrapper"] > div {{ padding: .55rem .7rem; }}
+[data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 10px; }}
+[data-testid="stVerticalBlockBorderWrapper"] p {{ margin-bottom: .15rem; }}
 </style>
 """

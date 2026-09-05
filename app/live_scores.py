@@ -17,6 +17,8 @@ import streamlit as st
 from app.dashboard_data import get_week_scoreboard
 from app.odds_helpers import format_pregame_line
 
+CARDS_PER_ROW = 4
+
 PACIFIC = pytz.timezone("America/Los_Angeles")
 
 # Live first, then upcoming, then settled; within a status, by kickoff.
@@ -172,7 +174,7 @@ def _team_row(side: Dict[str, Any], status: str) -> None:
 
 def _render_card(card: Dict[str, Any]) -> None:
     with st.container(border=True):
-        head, line = st.columns([2, 1], vertical_alignment="center")
+        head, line = st.columns([3, 2], vertical_alignment="center")
         with head:
             _status_chip(card)
         with line:
@@ -191,7 +193,7 @@ def _render_card(card: Dict[str, Any]) -> None:
 
 
 def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> None:
-    """The week's scoreboard, as a two-column grid of cards.
+    """The week's scoreboard, as a grid of cards.
 
     Built only from st.container(border=True) and st.badge, whose colours are
     theme tokens. There are deliberately no colour literals in this module, so
@@ -231,10 +233,11 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
     elif not any(card["has_picks"] for card in cards):
         st.caption("No picks in yet — showing every game this week.")
 
-    for row in range(0, len(cards), 2):
-        left, right = st.columns(2, gap="small")
-        with left:
-            _render_card(cards[row])
-        if row + 1 < len(cards):
-            with right:
-                _render_card(cards[row + 1])
+    # Four to a row: a card holds two team abbreviations and a kickoff time,
+    # so at two per row most of its width was empty. Streamlit stacks columns
+    # on a narrow viewport, so this is still one card per row on a phone.
+    for start in range(0, len(cards), CARDS_PER_ROW):
+        columns = st.columns(CARDS_PER_ROW, gap="small")
+        for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
+            with column:
+                _render_card(card)
