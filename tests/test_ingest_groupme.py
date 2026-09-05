@@ -104,28 +104,37 @@ def test_missing_credentials_is_a_clear_error(job_db, monkeypatch):
 
 
 def test_run_stops_at_the_trailing_window_edge(job_db, monkeypatch):
-    """The window is this job's whole design: re-read recent messages so their
-    favorite counts refresh, then stop rather than re-walk the season.
+    """Proves the walk HALTS at the window edge, not merely that old messages
+    are filtered out of the batch.
 
-    Nothing covered this branch before, which also left it as the only bound
-    on the walk - see test_run_bounds_the_walk_with_a_page_ceiling.
+    The window is this job's whole design: re-read recent messages so their
+    favorite counts refresh, then stop rather than re-walk the season against a
+    rate-limited API. A materialized-list mock cannot show the difference -
+    swapping `break` for `continue` passes it identically, because the
+    out-of-window messages fail the cutoff check either way and never reach the
+    batch. So this mock is a generator that records how far the walk actually
+    got, mirroring test_backfill_stops_walking_at_the_since_date.
     """
     now = int(datetime.now(timezone.utc).timestamp())
     inside = now - int(timedelta(days=1).total_seconds())
     outside = now - int(timedelta(days=30).total_seconds())
 
-    monkeypatch.setattr(
-        ingest_groupme, "iter_messages",
-        lambda *a, **k: iter([
-            raw("recent", created=inside),
-            raw("old", created=outside),
-            raw("older", created=outside - 100),
-        ]))
+    consumed = []
+
+    def walking(*a, **k):
+        for message in [raw("recent", created=inside),
+                        raw("old", created=outside),
+                        raw("older", created=outside - 100)]:
+            consumed.append(message["id"])
+            yield message
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", walking)
 
     inserted, _ = ingest_groupme.run(days=14)
 
     assert inserted == 1
     assert [r.message_id for r in job_db.query(ChatMessage).all()] == ["recent"]
+    assert consumed == ["recent", "old"]   # halted at the first out-of-window message
 
 
 def test_run_bounds_the_walk_with_a_page_ceiling(job_db, monkeypatch):
