@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from typing import Dict, Any
 import math
-from app.mobile_plotly_config import render_mobile_chart, get_mobile_color_scheme
+from app.mobile_plotly_config import render_mobile_chart
 
 def calculate_elimination_percentage(db, current_season: int, week: int) -> Dict[str, Any]:
     """

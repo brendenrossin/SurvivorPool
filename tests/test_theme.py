@@ -100,3 +100,69 @@ class TestTokens:
 
     def test_global_css_paints_the_app_background(self):
         assert theme.SURFACE in theme.GLOBAL_CSS
+
+
+class TestMobileConfigTokens:
+    """The shared Plotly layer. Every render_mobile_chart call site is in a
+    file this branch owns; the picks grid bypasses it entirely."""
+
+    def test_no_hardcoded_light_ink_remains(self):
+        src = open("app/mobile_plotly_config.py").read()
+        assert "#0F172A" not in src
+        assert '"white"' not in src
+
+    def test_layout_ink_is_readable_on_the_active_surface(self):
+        from app import mobile_plotly_config as mpc
+        layout = mpc.get_mobile_layout("bar_chart")
+        assert theme.contrast_ratio(layout["font"]["color"], theme.SURFACE) >= 4.5
+
+    def test_axis_ink_clears_the_large_text_floor(self):
+        from app import mobile_plotly_config as mpc
+        layout = mpc.get_mobile_layout("bar_chart")
+        tick = layout["xaxis"]["tickfont"]["color"]
+        assert theme.contrast_ratio(tick, theme.SURFACE) >= 3.0
+
+    def test_hover_label_sets_both_background_and_ink(self):
+        # The bug this guards: an earlier version set no font colour at all and
+        # Plotly's auto-contrast rendered white on white. Re-tokenize, never revert.
+        import plotly.graph_objects as go
+        from app import mobile_plotly_config as mpc
+        fig = go.Figure(go.Bar(x=[1], y=[1]))
+        mpc.apply_mobile_optimization(fig, "bar_chart")
+        hover = fig.data[0].hoverlabel
+        assert hover.bgcolor is not None
+        assert hover.font.color is not None
+        assert theme.contrast_ratio(hover.font.color, hover.bgcolor) >= 4.5
+
+    def test_get_mobile_layout_returns_a_copy(self):
+        # Callers mutate the returned dict; a shared reference would leak
+        # one chart's height into the next.
+        from app import mobile_plotly_config as mpc
+        first = mpc.get_mobile_layout("bar_chart")
+        first["height"] = 999
+        assert "height" not in mpc.get_mobile_layout("bar_chart")
+
+    def test_dead_helpers_are_gone(self):
+        from app import mobile_plotly_config as mpc
+        assert not hasattr(mpc, "create_touch_annotation")
+        assert not hasattr(mpc, "MOBILE_COLORS")
+        assert not hasattr(mpc, "get_mobile_color_scheme")
+
+    def test_gauge_and_donut_configs_removed(self):
+        from app import mobile_plotly_config as mpc
+        assert "gauge" not in mpc.CHART_CONFIGS
+        assert "donut" not in mpc.CHART_CONFIGS
+
+
+class TestModulesImportCleanly:
+    """A guard against exactly the breakage that deleting a shared helper
+    causes: the test suite never imports app.main, so an ImportError there
+    ships silently."""
+
+    @pytest.mark.parametrize("module", [
+        "app.main", "app.theme", "app.mobile_plotly_config",
+        "app.graveyard", "app.survivors", "app.team_of_doom", "app.chaos_meter",
+    ])
+    def test_module_imports(self, module):
+        import importlib
+        importlib.import_module(module)

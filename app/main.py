@@ -60,8 +60,9 @@ from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
-from app.mobile_plotly_config import render_mobile_chart, get_mobile_config, get_mobile_color_scheme
+from app.mobile_plotly_config import render_mobile_chart, get_mobile_config
 from app.odds_helpers import get_underdog_spread_text
+from app.theme import WIN, DANGER
 
 # Load environment
 from dotenv import load_dotenv
@@ -375,12 +376,11 @@ def render_remaining_players_donut(summary):
     percentage = (remaining / total * 100) if total > 0 else 0
 
     # Create mobile-optimized donut chart with consistent colors
-    mobile_colors = get_mobile_color_scheme()
     fig = go.Figure(data=[go.Pie(
         labels=['Remaining', 'Eliminated'],
         values=[remaining, eliminated],
         hole=0.6,
-        marker_colors=[mobile_colors['remaining'], mobile_colors['eliminated']],
+        marker_colors=[WIN, DANGER],
         textinfo='label',  # Only show labels for better mobile experience
         hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Percentage: %{percent}<extra></extra>"
     )])
