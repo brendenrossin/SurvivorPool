@@ -58,3 +58,32 @@ def test_duplicate_ids_within_one_batch_do_not_double_insert(db):
     inserted, updated = upsert_messages(db, [raw("m1", favs=1), raw("m1", favs=4)])
     assert inserted == 1
     assert db.query(ChatMessage).one().favorite_count == 4
+
+
+def test_duplicate_ids_in_one_batch_under_production_session_semantics(db):
+    """The explicit db.flush() in upsert_messages is load-bearing in production.
+
+    tests/conftest.py builds its session with SQLAlchemy's default
+    autoflush=True, which masks this: the lookup query auto-flushes the
+    pending add, so a repeated id inside one batch is found whether or not
+    upsert_messages flushes explicitly. api/database.py builds SessionLocal
+    with autoflush=False, so production has no such safety net - without the
+    flush the lookup misses the pending row and commit() raises on the
+    primary key. The poller re-scans an overlapping window, so a batch
+    containing the same id twice is normal input, not an edge case.
+
+    This test pins the production configuration so removing the flush fails
+    here instead of in production.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    Session = sessionmaker(bind=db.get_bind(), autoflush=False)
+    session = Session()
+    try:
+        inserted, updated = upsert_messages(
+            session, [raw("m1", favs=1), raw("m1", favs=4)])
+
+        assert inserted == 1
+        assert session.query(ChatMessage).one().favorite_count == 4
+    finally:
+        session.close()
