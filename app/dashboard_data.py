@@ -433,6 +433,19 @@ def build_attrition_rows(entrants, elims_by_week, weeks):
     return rows
 
 
+def select_attrition_weeks(pick_weeks, last_started_week):
+    """Which weeks belong in the attrition series.
+
+    Only weeks that have kicked off. The sheet holds picks for unplayed weeks,
+    so without this a pre-season week 1 reports "5 entered, 0 eliminated" as
+    though it had been played. Before any kickoff the series is empty and the
+    caller shows its own empty state.
+    """
+    if last_started_week is None:
+        return []
+    return [w for w in sorted(pick_weeks) if w <= last_started_week]
+
+
 def _first_elimination_subquery(db, season):
     """Each player's first losing week - the graveyard's definition.
 
@@ -481,13 +494,7 @@ def get_attrition_series(season: int):
             db.query(Pick.week).filter(Pick.season == season).distinct().all()
         )
 
-        # Never project past the last week that kicked off: the sheet holds
-        # picks for unplayed weeks, and a future week would read as a cliff
-        # to zero eliminations.
-        cutoff = _last_started_week(season)
-        if cutoff is not None:
-            weeks = [w for w in weeks if w <= cutoff]
-
+        weeks = select_attrition_weeks(weeks, _last_started_week(season))
         return build_attrition_rows(entrants, elims, weeks)
     finally:
         try:

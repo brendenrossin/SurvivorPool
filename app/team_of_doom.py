@@ -1,256 +1,87 @@
-#!/usr/bin/env python3
 """
-Team of Doom - Shows which teams eliminated the most players
+Teams ranked by how many entrants they eliminated.
+
+Bars carry the team's own colour passed through contrast_fill. A bar floats on
+the surface with no border, so - unlike a grid cell, which carries a hairline
+and contrast-derived ink - its legibility is entirely fill-vs-surface contrast,
+and 22 of 32 team colours fail that on the dark surface untreated.
 """
 
-import streamlit as st
-import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-from typing import List, Dict, Any
-import os
-from app.mobile_plotly_config import render_mobile_chart
+import streamlit as st
 
-def get_team_of_doom_data(db, current_season: int) -> Dict[str, Any]:
-    """
-    Get data for Team of Doom analysis - teams that eliminated the most players
-    """
-    from api.models import Pick, PickResult, Game, Player
+from app.dashboard_data import get_doom_teams, load_team_data
+from app.mobile_plotly_config import get_mobile_config
+from app.theme import BORDER, FONT_STACK, INK, INK_MUTED, SURFACE, contrast_fill
 
-    try:
-        # Get all picks that resulted in elimination (survived = False)
-        # Use team/week matching since game_id may not be set correctly
-        eliminated_picks_query = db.query(
-            Pick.team_abbr,
-            Pick.week,
-            Player.display_name,
-            Game.home_team,
-            Game.away_team,
-            Game.winner_abbr,
-            Game.home_score,
-            Game.away_score
-        ).join(
-            PickResult, Pick.pick_id == PickResult.pick_id
-        ).join(
-            Game, (Game.home_team == Pick.team_abbr) | (Game.away_team == Pick.team_abbr)
-        ).join(
-            Player, Pick.player_id == Player.player_id
-        ).filter(
-            Pick.season == current_season,
-            Game.season == current_season,
-            Game.week == Pick.week,
-            PickResult.survived == False,  # Only eliminated picks
-            Game.home_score.isnot(None),
-            Game.away_score.isnot(None)  # Only games with scores
-        )
+TOP_N = 10
+FALLBACK_COLOR = "#64748B"
 
-        eliminated_picks = eliminated_picks_query.all()
 
-        if not eliminated_picks:
-            return {
-                "doom_teams": [],
-                "total_eliminations": 0,
-                "worst_week": None,
-                "elimination_details": []
-            }
+def build_doom_figure(rows, team_colors):
+    """Horizontal ranked bars, each in its team's contrast-corrected colour."""
+    fig = go.Figure()
+    if not rows:
+        return fig
 
-        # Count eliminations by team
-        doom_count = {}
-        elimination_details = []
+    # plotly draws horizontal bars bottom-up, so reverse to put rank 1 on top
+    shown = list(reversed(rows[:TOP_N]))
+    fills = [
+        contrast_fill(team_colors.get(row["team"], FALLBACK_COLOR), SURFACE)
+        for row in shown
+    ]
 
-        for pick in eliminated_picks:
-            team = pick.team_abbr
-            week = pick.week
-            player = pick.display_name
-
-            # Determine opponent and score details
-            if pick.home_team == team:
-                opponent = pick.away_team
-                team_score = pick.home_score
-                opponent_score = pick.away_score
-                home_away = "vs"
-            else:
-                opponent = pick.home_team
-                team_score = pick.away_score
-                opponent_score = pick.home_score
-                home_away = "@"
-
-            if team not in doom_count:
-                doom_count[team] = {
-                    "count": 0,
-                    "victims": [],
-                    "weeks": set(),
-                    "games": []
-                }
-
-            doom_count[team]["count"] += 1
-            doom_count[team]["victims"].append(player)
-            doom_count[team]["weeks"].add(week)
-            doom_count[team]["games"].append({
-                "week": week,
-                "opponent": opponent,
-                "home_away": home_away,
-                "team_score": team_score,
-                "opponent_score": opponent_score,
-                "player": player
-            })
-
-            elimination_details.append({
-                "team": team,
-                "week": week,
-                "player": player,
-                "opponent": opponent,
-                "home_away": home_away,
-                "score": f"{team_score}-{opponent_score}" if team_score is not None else "N/A"
-            })
-
-        # Sort teams by elimination count
-        doom_teams = []
-        for team, data in doom_count.items():
-            doom_teams.append({
-                "team": team,
-                "eliminations": data["count"],
-                "victims": data["victims"],
-                "weeks_active": list(data["weeks"]),
-                "games": data["games"],
-                "average_per_week": data["count"] / len(data["weeks"]) if data["weeks"] else 0
-            })
-
-        doom_teams.sort(key=lambda x: x["eliminations"], reverse=True)
-
-        # Find worst week (most eliminations in a single week)
-        week_eliminations = {}
-        for detail in elimination_details:
-            week = detail["week"]
-            if week not in week_eliminations:
-                week_eliminations[week] = 0
-            week_eliminations[week] += 1
-
-        worst_week = max(week_eliminations.items(), key=lambda x: x[1]) if week_eliminations else None
-
-        return {
-            "doom_teams": doom_teams,
-            "total_eliminations": len(eliminated_picks),
-            "worst_week": worst_week,
-            "elimination_details": elimination_details
-        }
-
-    except Exception as e:
-        st.error(f"Error fetching Team of Doom data: {e}")
-        return {
-            "doom_teams": [],
-            "total_eliminations": 0,
-            "worst_week": None,
-            "elimination_details": []
-        }
-
-def render_team_of_doom_widget(db, current_season: int):
-    """
-    Render the Team of Doom widget
-    """
-    st.subheader("💀 Team of Doom")
-    st.caption("Teams that have eliminated the most players")
-
-    # Get Team of Doom data
-    doom_data = get_team_of_doom_data(db, current_season)
-
-    if not doom_data["doom_teams"]:
-        st.info("No eliminations yet this season!")
-        return
-
-    # Bar chart of eliminations by team (single column layout)
-    doom_teams = doom_data["doom_teams"][:10]  # Top 10
-
-    df = pd.DataFrame(doom_teams)
-
-    # Load team colors
-    from app.dashboard_data import load_team_data
-    team_data = load_team_data()
-
-    # Add team colors to dataframe
-    df["color"] = df["team"].apply(lambda team: team_data["teams"].get(team, {}).get("color", "#666666"))
-
-    fig = px.bar(
-        df,
-        x="eliminations",
-        y="team",
+    fig.add_trace(go.Bar(
+        x=[row["eliminations"] for row in shown],
+        y=[row["team"] for row in shown],
         orientation="h",
-        title="Eliminations by Team",
-        labels={"eliminations": "Players Eliminated", "team": "Team"},
-        color="team",
-        color_discrete_map={row["team"]: row["color"] for _, row in df.iterrows()}
-    )
-
+        marker=dict(color=fills, line=dict(width=0)),
+        text=[str(row["eliminations"]) for row in shown],
+        textposition="outside",
+        textfont=dict(color=INK, size=12, family=FONT_STACK),
+        cliponaxis=False,
+        hovertemplate="%{y}: %{x} eliminated<extra></extra>",
+    ))
     fig.update_layout(
-        height=400,
-        yaxis={'categoryorder': 'total ascending'},
-        showlegend=False
+        height=max(220, len(shown) * 30 + 60),
+        margin=dict(l=8, r=40, t=8, b=24),
+        font=dict(family=FONT_STACK, size=12, color=INK),
+        xaxis=dict(visible=False),
+        yaxis=dict(tickfont=dict(color=INK_MUTED, size=12),
+                   gridcolor=BORDER, showgrid=False),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        bargap=0.3,
     )
+    return fig
 
-    # Use mobile optimization for bar chart
-    render_mobile_chart(fig, 'bar_chart')
 
-    # Add summary stats below the chart
-    if doom_data["worst_week"]:
-        col1, col2 = st.columns(2)
+def _lead_caption(rows):
+    """Say something true about the leader, not a generic restatement."""
+    leader = rows[0]
+    chasers = rows[1:4]
+    if len(chasers) == 3 and leader["eliminations"] > sum(
+            r["eliminations"] for r in chasers):
+        return (f"{leader['team']} ended {leader['eliminations']} runs - more "
+                f"than the next three teams combined.")
+    return f"{leader['team']} ended {leader['eliminations']} runs."
 
-        with col1:
-            st.metric("Total Eliminations", doom_data["total_eliminations"])
 
-        with col2:
-            week_num, week_count = doom_data["worst_week"]
-            st.metric("Worst Week", f"Week {week_num} ({week_count} eliminations)")
+@st.fragment
+def render_team_of_doom_widget(season):
+    """Render the Team of Doom ranking."""
+    st.markdown('<div class="eyebrow">Team of doom</div>', unsafe_allow_html=True)
+    st.caption("Teams that ended the most entrants' seasons.")
 
-def render_doom_details(db, current_season: int):
-    """
-    Render detailed elimination breakdown
-    """
-    st.subheader("📊 Elimination Details")
-
-    doom_data = get_team_of_doom_data(db, current_season)
-
-    if not doom_data["elimination_details"]:
-        st.info("No eliminations to show yet")
+    rows = get_doom_teams(season)
+    if not rows:
+        st.info("Nobody has been eliminated yet. This fills in when a picked "
+                "team loses a completed week.")
         return
 
-    # Create DataFrame for detailed view
-    details_df = pd.DataFrame(doom_data["elimination_details"])
-
-    # Add week filter
-    all_weeks = sorted(details_df["week"].unique())
-    selected_week = st.selectbox(
-        "Filter by week:",
-        ["All Weeks"] + [f"Week {w}" for w in all_weeks]
-    )
-
-    if selected_week != "All Weeks":
-        week_num = int(selected_week.split(" ")[1])
-        details_df = details_df[details_df["week"] == week_num]
-
-    # Display elimination table
-    display_df = details_df.rename(columns={
-        "week": "Week",
-        "team": "Team",
-        "player": "Player",
-        "opponent": "vs/at",
-        "home_away": "H/A",
-        "score": "Final Score"
-    })
-
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-    # Summary stats
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric("Total Eliminations", len(doom_data["elimination_details"]))
-
-    with col2:
-        if doom_data["doom_teams"]:
-            worst_team = doom_data["doom_teams"][0]
-            st.metric("Worst Team", f"{worst_team['team']} ({worst_team['eliminations']})")
-
-    with col3:
-        if doom_data["worst_week"]:
-            week_num, week_count = doom_data["worst_week"]
-            st.metric("Worst Week", f"Week {week_num} ({week_count})")
+    colors = {team: data.get("color", FALLBACK_COLOR)
+              for team, data in load_team_data()["teams"].items()}
+    st.plotly_chart(build_doom_figure(rows, colors),
+                    use_container_width=True, config=get_mobile_config())
+    st.caption(_lead_caption(rows))

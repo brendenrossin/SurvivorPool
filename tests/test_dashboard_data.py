@@ -190,3 +190,24 @@ class TestClampPicksToWeek:
     def test_empty_picks_stay_empty(self):
         from app.dashboard_data import clamp_picks_to_week
         assert clamp_picks_to_week([], 3) == []
+
+
+class TestSelectAttritionWeeks:
+    """Before any kickoff there is no attrition to report. Without this the
+    tracker renders 2026's unplayed week 1 as "5 entered, 0 eliminated"."""
+
+    def test_returns_empty_when_no_week_has_started(self):
+        from app.dashboard_data import select_attrition_weeks
+        assert select_attrition_weeks([1], None) == []
+
+    def test_drops_weeks_past_kickoff(self):
+        from app.dashboard_data import select_attrition_weeks
+        assert select_attrition_weeks([1, 2, 3, 4], 2) == [1, 2]
+
+    def test_keeps_the_started_week_itself(self):
+        from app.dashboard_data import select_attrition_weeks
+        assert select_attrition_weeks([1, 2], 2) == [1, 2]
+
+    def test_sorts_its_input(self):
+        from app.dashboard_data import select_attrition_weeks
+        assert select_attrition_weeks([3, 1, 2], 3) == [1, 2, 3]
