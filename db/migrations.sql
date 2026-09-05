@@ -60,3 +60,19 @@ CREATE INDEX IF NOT EXISTS idx_picks_season_week ON picks(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_season_week ON games(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_pick_results_survived ON pick_results(survived);
+-- GroupMe chat history, source of the recap bot's voice corpus
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    sender_id TEXT,
+    sender_name TEXT,
+    sender_type TEXT,
+    text TEXT,
+    favorite_count INT NOT NULL DEFAULT 0,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+-- corpus reads are "most-liked, before a cutoff"
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_favorites ON chat_messages(favorite_count DESC);

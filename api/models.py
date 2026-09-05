@@ -64,3 +64,15 @@ class JobMeta(Base):
     last_run_at = Column(DateTime(timezone=True))
     status = Column(String)
     message = Column(Text)
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    message_id = Column(String, primary_key=True)   # GroupMe's own id
+    group_id = Column(String, nullable=False)
+    sender_id = Column(String)
+    sender_name = Column(String)
+    sender_type = Column(String)                    # "user" | "bot" | "system"
+    text = Column(String)
+    favorite_count = Column(Integer, nullable=False, default=0)
+    is_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
