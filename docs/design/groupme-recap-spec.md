@@ -154,6 +154,32 @@ end-of-clause, which reads differently from how the group uses them.
 **4. Permission to be mean.** Survivor pool chat is mean. A polite recap is an AI tell
 by itself.
 
+**5. One angle, no second helping.** The first smoke test recited the headline stat,
+then a second stat, then closed on a line that reframed both. The owner's read: *"I like
+the first sentence a lot, the rest is ehh."* So the instruction is not "be concise" but
+"land one angle and stop" - explicitly no stat recitation after the opening, and no
+closing line that draws a lesson from what was just said.
+
+### Naming individuals
+
+The owner's rule: *"we should know who 'that one guy' is from our data and call him out
+especially if he's the winner! otherwise we won't need to call out individuals unless
+it's part of one of the bits."*
+
+**Name someone only when they are the story by being alone** - the sole survivor, the
+winner, the only person eliminated that week, the only one on a pick nobody else made.
+Never name people as members of a group. If nobody is singular, name nobody. A GroupMe
+bit that already carries a name is the one exception.
+
+The rule handles both tails of the season out of the same clause. Week 14 of 2025 had
+one surviving picker out of 22; week 7 had exactly one elimination out of 63. In both
+weeks the named individual *is* the entire story, and in weeks like 3 (66 eliminated)
+there is no individual to name and the rule says so.
+
+`players.display_name` joins straight through `picks`, so this needs no schema change.
+`WeekFeatures` carries `sole_survivor`, `sole_elimination`, `contrarian_survivors` and
+`winner` as nullable name fields; null means the rule does not fire.
+
 ### The chat's membership is the surviving field
 
 The owner: *"groupme is the total number of players left not eliminated at any time."*
@@ -249,7 +275,13 @@ Deterministic, no network, no LLM, fully unit-testable. This is where TDD applie
 `biggest_favorite_that_lost` (+ spread), `scenario`.
 
 `games.point_spread` and `games.favorite_team` already exist, so the upset field needs
-no schema change.
+no schema change. Nullable name fields per the naming rule: `sole_survivor`,
+`sole_elimination`, `contrarian_survivors`, `winner`.
+
+**Alive and picked are not the same number.** Week 14 of 2025 had 22 alive, 19 picks,
+and 18 eliminations - three players submitted nothing and were not eliminated for it.
+`alive_at_start` must be derived from elimination history, never from a count of picks,
+and the non-picker gap needs a deliberate answer rather than an accidental one.
 
 ---
 
@@ -303,10 +335,15 @@ otherwise; `RECAP_MODEL` stays an env var so it can change without a deploy.
 `fastapi==0.104.1`. `fastapi` is imported nowhere in the repo - drop it from
 `requirements.txt` in the same change that adds `anthropic`.
 
-**Smoke-tested 2026-09-05.** A zero-corpus week-14 generation on `claude-opus-5` came
-back at 233 chars, no emoji, no em-dash, $0.0055 (329 in / 156 out). Real input will be
-larger once the voice corpus is attached, so the per-recap figures above stand as an
-upper bound.
+**Smoke-tested 2026-09-05,** zero-corpus, `claude-opus-5` at `effort: low`. First pass
+came back at 233 chars for $0.0055. A second pass with the naming rule and the
+one-angle instruction ran weeks 14, 7 and 11 at 187/151/149 chars for ~$0.004 each, all
+clean on length, emoji and em-dash, and all three applied the naming rule correctly.
+
+Two prompt defects survived into that second pass and are GRPM-3's job: the week-14
+output still closed on a reframe ("which is a polite way of saying..."), and week 11
+opened on a tricolon ("24 picks, 24 wins, zero drama") despite the ban. Both suggest
+the ban list needs examples rather than labels.
 
 **No prompt caching.** It runs weekly. The cache TTL is 5 minutes by default and 1 hour
 at most, so the hit rate is structurally zero. Adding it would be cargo cult.
