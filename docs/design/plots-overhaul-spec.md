@@ -71,7 +71,7 @@ moves teams off their own labelled rows, this must be revisited.
 | File | Change | DB access |
 |---|---|---|
 | `.streamlit/config.toml` | NEW — `base="dark"` | — |
-| `app/theme.py` | NEW — tokens, `lift_color`, `GLOBAL_CSS` | none |
+| `app/theme.py` | NEW — tokens, `contrast_fill`, `GLOBAL_CSS` | none |
 | `app/attrition.py` | NEW — sparkline + full curve figures | none |
 | `app/meme_cards.py` | NEW — ranked card rendering | none |
 | `app/dashboard_data.py` | + 4 cached functions; week clamp fix | all of it |
@@ -192,7 +192,7 @@ Exported tokens, consumed by this branch and by Session B:
 `build_picks_grid(background=...)` receives. `DANGER` resolves to `#B91C1C` on light
 and `#EF4444` on dark.
 
-### `lift_color` applies to floating marks only — never to the grid
+### `contrast_fill` applies to floating marks, and to the grid's current week
 
 The distinction that makes surface choice and colour fidelity independent:
 
@@ -203,14 +203,47 @@ The distinction that makes surface choice and colour fidelity independent:
   dark ink. **A bounded cell keeps true team colour on any surface.**
 - **A floating mark** — a Team of Doom bar — sits directly on the surface with no
   border. Its legibility is entirely fill-vs-surface contrast, which is where 22 of 32
-  teams fail on dark and where `lift_color` is required.
+  teams fail on dark and where `contrast_fill` is required.
 
-So `lift_color` is scoped to this branch's bars. The picks grid neither needs nor
+So `contrast_fill` is scoped to this branch's bars. The picks grid neither needs nor
 imports it, and keeps actual team colours rather than lifted approximations.
 
 This also keeps Session B's two muting axes orthogonal: history mutes on **lightness**
-preserving hue, elimination mutes on **saturation** dropping it. `lift_color` moves
+preserving hue, elimination mutes on **saturation** dropping it. `contrast_fill` moves
 lightness, which would collide — hence it stays out of that module entirely.
+
+
+### Ruling: the grid's current week is lifted
+
+The bounded/floating distinction above is about **legibility** and it holds. A second
+property — **emphasis**, whether the current week still separates from muted history —
+does degrade on the dark surface, because that separation is bounded by the distance
+from a team's colour to the ground.
+
+Measured on the real Week 6 2025 grid (CIE76 between a team's current-week cell and
+its muted history):
+
+| | worst separation |
+|---|---|
+| Dark, true colour | ΔE 7.8 (LV) |
+| Dark, current week lifted | ΔE 35.0 |
+| Light, true colour | ΔE 46.1 |
+
+An alternative — muting history toward `SURFACE_RAISED` instead of `SURFACE` — was
+tested and is **worse**: min ΔE 3.1, five teams under 10. Rejected.
+
+**The owner ruled on a rendered three-way comparison of the real grid, not on these
+numbers:** dark, with the current week lifted. So `contrast_fill` is scoped as
+*not for legibility, yes for emphasis on the current week*. History is untouched, and
+`HISTORY_MIX` must not move — raising it pushes muted toward true, lowering it pins
+muted to the surface.
+
+Session B's two muting axes survive: `contrast_fill` moves lightness but only on the
+current week, which neither history-muting (lightness) nor elimination-muting
+(saturation) touches.
+
+Accepted cost, looked at explicitly before ruling: `LV #000000` lifts to `#616161`.
+Black cannot be shown on black. Four picks in the 2025 season.
 
 ### Emoji: removed, not reduced
 
@@ -316,7 +349,7 @@ is what makes them live; none is a regression it introduces.
 
 **The picks-grid encoding stays intact.** Muted = earlier week, full colour = current
 week, colour carries identity rather than magnitude. This branch changes the surface
-that encoding sits on, which is why `lift_color`'s hue preservation is the right
+that encoding sits on, which is why `contrast_fill`'s hue preservation is the right
 property — but the encoding itself is approved and locked, and amending it is the
 owner's call, not a between-sessions one.
 
@@ -351,7 +384,7 @@ return — it would `TypeError` if anything reached it.
 Logic lives in pure functions so it is reachable without a Streamlit runtime, the same
 approach that made `picks_grid` testable.
 
-- `tests/test_theme.py` — `lift_color` holds the 3:1 floor for all 32 real team
+- `tests/test_theme.py` — `contrast_fill` holds the 3:1 floor for all 32 real team
   colours, preserves hue, is idempotent, and leaves already-passing colours untouched.
 - `tests/test_attrition.py` — series shaping, the single-week case, the plateau case.
 - `tests/test_dashboard_data.py` — doom ranking and tie-breaks, the `get_player_data`
