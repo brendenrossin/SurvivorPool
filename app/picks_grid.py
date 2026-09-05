@@ -250,6 +250,82 @@ def eliminated_edge(fill: str, danger: str = DANGER) -> str:
     return ensure_contrast(danger, fill)
 
 
+def _to_hsl(hex_color: str) -> Tuple[float, float, float]:
+    r, g, b = (c / 255 for c in _channels(hex_color))
+    high, low = max(r, g, b), min(r, g, b)
+    lightness = (high + low) / 2
+    if high == low:
+        return 0.0, 0.0, lightness
+    delta = high - low
+    sat = delta / (2 - high - low) if lightness > 0.5 else delta / (high + low)
+    if high == r:
+        hue = ((g - b) / delta) % 6
+    elif high == g:
+        hue = (b - r) / delta + 2
+    else:
+        hue = (r - g) / delta + 4
+    return hue / 6, sat, lightness
+
+
+def _from_hsl(hue: float, sat: float, lightness: float) -> str:
+    if sat == 0:
+        channel = round(lightness * 255)
+        return "#{0:02x}{0:02x}{0:02x}".format(channel)
+    q = lightness * (1 + sat) if lightness < 0.5 else lightness + sat - lightness * sat
+    p = 2 * lightness - q
+
+    def component(t: float) -> int:
+        t = t % 1
+        if t < 1 / 6:
+            value = p + (q - p) * 6 * t
+        elif t < 1 / 2:
+            value = q
+        elif t < 2 / 3:
+            value = p + (q - p) * (2 / 3 - t) * 6
+        else:
+            value = p
+        return max(0, min(255, round(value * 255)))
+
+    return "#{:02x}{:02x}{:02x}".format(
+        component(hue + 1 / 3), component(hue), component(hue - 1 / 3)
+    )
+
+
+def contrast_fill(color: str, background: str, target: float = WCAG_GRAPHIC_MIN) -> str:
+    """Move `color`'s lightness until it clears `target` against `background`.
+
+    Bidirectional and hue-preserving: it lightens on a dark surface and darkens
+    on a light one, and moves only as far as the floor requires, so a team that
+    already clears is returned untouched.
+
+    This exists because the grid's emphasis channel is bounded by the distance
+    from a team's colour to the surface. The current week carries true team
+    colour and earlier weeks recede to mute_color(); on #0B1220 a dark team has
+    nowhere to recede to, and CIE76 dE between CHI's current and muted cells
+    falls to 3.5 - about the just-noticeable threshold - so the grid stops
+    leading with the current week, which is its entire purpose. Lifting the
+    emphasised end is the only direction with headroom: raising HISTORY_MIX
+    moves muted toward true, and lowering it pins muted to the surface.
+
+    A wholly achromatic team cannot keep a hue it does not have, so LV #000000
+    lifts to a grey. Black cannot be shown on black; that is the accepted cost.
+    """
+    if contrast_ratio(color, background) >= target:
+        return color
+
+    hue, sat, lightness = _to_hsl(color)
+    lighten = relative_luminance(background) <= 0.45
+
+    for step in range(1, 101):
+        moved = lightness + step / 100 if lighten else lightness - step / 100
+        if not 0 <= moved <= 1:
+            break
+        candidate = _from_hsl(hue, sat, moved)
+        if contrast_ratio(candidate, background) >= target:
+            return candidate
+    return "#ffffff" if lighten else "#000000"
+
+
 DISSOLVE_RATIO = 1.35    # below this a fill and the surface read as one block
 HISTORY_INK_MIX = 0.72   # how much of full-contrast ink history keeps
 
@@ -291,6 +367,7 @@ def build_picks_grid(
     team_names: Optional[Dict[str, str]] = None,
     team_status: Optional[Dict[str, str]] = None,
     danger: str = DANGER,
+    current_week_min_contrast: float = 0.0,
 ) -> go.Figure:
     """Build the picks grid figure.
 
@@ -313,6 +390,12 @@ def build_picks_grid(
             only - history's job here is volume, not outcome. None renders
             exactly as before.
         danger: semantic danger hue for the eliminated border.
+        current_week_min_contrast: when non-zero, lift the current week's fills
+            to clear this contrast ratio against `background`. The grid's
+            emphasis is bounded by team-colour-to-surface distance, so on a
+            dark surface a dark team has nowhere for its history to recede to.
+            History is deliberately NOT lifted - that would close the gap this
+            opens. 0 leaves fills at true team colour.
     """
     team_names = team_names or {}
     team_status = team_status or {}
@@ -339,7 +422,10 @@ def build_picks_grid(
                 fill = eliminated_fill(base, background)
                 edge, edge_width, ink = eliminated_edge(fill, danger), 2, label_ink(fill)
             elif is_now:
-                fill = base
+                fill = (
+                    contrast_fill(base, background, current_week_min_contrast)
+                    if current_week_min_contrast else base
+                )
                 edge, edge_width, ink = cell_edge(fill, background), 1, label_ink(fill)
             else:
                 fill = muted

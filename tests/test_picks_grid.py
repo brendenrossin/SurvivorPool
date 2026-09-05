@@ -8,9 +8,12 @@ import pytest
 
 from app.picks_grid import (
     DANGER,
+    _channels,
+    _to_hsl,
     aggregate_picks,
     build_picks_grid,
     cell_edge,
+    contrast_fill,
     contrast_ratio,
     eliminated_edge,
     eliminated_fill,
@@ -432,3 +435,82 @@ class TestEliminatedInFigure:
     def test_the_tooltip_names_the_elimination(self):
         trace = _grid(team_status=WK14_STATUS).data[0]
         assert any("Eliminated" in text for text in trace.hovertext)
+
+
+class TestContrastFill:
+    """The current week's emphasis, lifted so the grid keeps leading with it.
+
+    The grid's emphasis channel is bounded by team-colour-to-surface distance,
+    so on #0B1220 a dark team has nowhere for its history to recede to: CIE76
+    dE between CHI's current and muted cells falls to 3.5, about the
+    just-noticeable threshold.
+    """
+
+    def test_a_team_that_already_clears_is_untouched(self):
+        """Moves only as far as the floor requires."""
+        assert contrast_fill("#FB4F14", DARK_SURFACE) == "#FB4F14"
+
+    def test_dark_teams_are_lifted_on_a_dark_surface(self):
+        for team in ("#0B162A", "#03202F", "#0C2340", "#203731"):
+            lifted = contrast_fill(team, DARK_SURFACE)
+            assert lifted != team
+            assert contrast_ratio(lifted, DARK_SURFACE) >= 3.0
+
+    def test_light_teams_are_darkened_on_a_light_surface(self):
+        """Bidirectional. PIT gold and NO vegas gold fail on light and must
+        come down; a lift-only version would run PIT to white."""
+        for team in ("#FFB612", "#D3BC8D"):
+            darkened = contrast_fill(team, LIGHT_SURFACE)
+            assert relative_luminance(darkened) < relative_luminance(team)
+            assert contrast_ratio(darkened, LIGHT_SURFACE) >= 3.0
+
+    def test_every_team_clears_the_floor_on_both_surfaces(self):
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                assert contrast_ratio(contrast_fill(team, surface), surface) >= 3.0
+
+    def test_hue_is_preserved(self):
+        """Lifting must not turn a team into a different team."""
+        for team in ("#0B162A", "#203731", "#00338D"):
+            assert abs(_to_hsl(contrast_fill(team, DARK_SURFACE))[0] - _to_hsl(team)[0]) < 0.02
+
+    def test_a_black_team_lifts_to_grey(self):
+        """LV #000000 has no hue to keep. Black cannot be shown on black; this
+        is the accepted cost, not a bug to special-case back."""
+        lifted = contrast_fill("#000000", DARK_SURFACE)
+        r, g, b = _channels(lifted)
+        assert r == g == b and r > 0
+
+    def test_it_restores_the_emphasis_the_dark_surface_took_away(self):
+        """The measurement that motivated it: CHI's current-vs-muted gap."""
+        for team in ("#0B162A", "#03202F", "#000000", "#0C2340"):
+            muted = mute_color(team, DARK_SURFACE)
+            assert contrast_ratio(team, muted) < 1.6, "true colour barely separates"
+            assert contrast_ratio(contrast_fill(team, DARK_SURFACE), muted) >= 2.5
+
+
+class TestLiftedGridKeepsBothMutingAxes:
+    """Lifting touches the current week only, so neither mute is disturbed."""
+
+    def test_history_is_never_lifted(self):
+        """Lifting history would close the gap the lift exists to open."""
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert mute_color("#D50A0A", DARK_SURFACE) in fills
+
+    def test_elimination_still_mutes_on_saturation(self):
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0,
+                    team_status=WK14_STATUS)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert eliminated_fill("#D50A0A", DARK_SURFACE) in fills
+
+    def test_an_eliminated_cell_is_not_lifted(self):
+        """Elimination replaces the fill outright; it does not get emphasised."""
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=3.0,
+                    team_status=WK14_STATUS)
+        fills = [s["fillcolor"] for s in fig.layout.shapes]
+        assert contrast_fill("#D50A0A", DARK_SURFACE) not in fills
+
+    def test_zero_leaves_the_grid_at_true_team_colour(self):
+        fig = _grid(background=DARK_SURFACE, current_week_min_contrast=0.0)
+        assert "#D50A0A" in [s["fillcolor"] for s in fig.layout.shapes]

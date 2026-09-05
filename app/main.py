@@ -43,6 +43,7 @@ from app.picks_grid import (
     MIN_ROWS,
     aggregate_picks,
     build_picks_grid,
+    contrast_fill,
     eliminated_edge,
     eliminated_fill,
     mute_color,
@@ -66,6 +67,10 @@ SEASON = int(os.getenv("NFL_SEASON", 2025))
 # Kept in step with the .stApp background in the CSS block below.
 APP_SURFACE = "#F8FAFC"
 COUNT_LABEL, PERCENT_LABEL = "Count", "% of week"
+# Floor the current week's fills must clear against APP_SURFACE. WCAG 2.1's
+# non-text minimum; see contrast_fill in app/picks_grid.py for why the grid
+# needs it at all.
+EMPHASIS_MIN_CONTRAST = 3.0
 team_data = load_team_data()
 
 def main():
@@ -449,6 +454,11 @@ def render_weekly_picks_chart(summary):
         background=APP_SURFACE,
         team_names=get_team_name_map(),
         team_status=team_status,
+        # The grid's emphasis is bounded by team-colour-to-surface distance, so
+        # a dark team on a dark surface has nowhere for its history to recede
+        # to. Bidirectional: this also darkens PIT and NO on a light surface,
+        # where they fail against #F8FAFC.
+        current_week_min_contrast=EMPHASIS_MIN_CONTRAST,
     )
 
     # Deliberately not render_mobile_chart: CHART_CONFIGS would overwrite the
@@ -464,9 +474,10 @@ def render_weekly_picks_chart(summary):
         'border-radius:2px;vertical-align:-1px;'
     )
     sample = get_team_color_map().get(rows[0], "#666666")
+    lifted = contrast_fill(sample, APP_SURFACE, EMPHASIS_MIN_CONTRAST)
     out_fill = eliminated_fill(sample, APP_SURFACE)
     st.caption(
-        f'<span style="background:{sample};{swatch}"></span> this week'
+        f'<span style="background:{lifted};{swatch}"></span> this week'
         ' &nbsp;·&nbsp; '
         f'<span style="background:{mute_color(sample, APP_SURFACE)};{swatch}"></span>'
         ' earlier weeks'
