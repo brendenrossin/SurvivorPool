@@ -10,6 +10,8 @@ height and its axis config. It therefore needs its own theming pass, which
 belongs to whoever owns that module.
 """
 
+import copy
+
 from app.theme import BORDER, FONT_STACK, INK, INK_MUTED, SURFACE_RAISED
 
 # Touch interactions only. Shared with the picks grid, which takes this config
@@ -53,8 +55,13 @@ def get_mobile_config():
 
 
 def get_mobile_layout(chart_type='default'):
-    """Layout defaults for a chart type. A copy - callers mutate the result."""
-    return dict(CHART_CONFIGS.get(chart_type, MOBILE_LAYOUT_DEFAULTS))
+    """Layout defaults for a chart type.
+
+    A deep copy: the axis dicts are shared between chart types, so a shallow
+    copy would let one caller's mutation of layout["xaxis"] leak into every
+    later chart in the process.
+    """
+    return copy.deepcopy(CHART_CONFIGS.get(chart_type, MOBILE_LAYOUT_DEFAULTS))
 
 
 def apply_mobile_optimization(fig, chart_type='default'):

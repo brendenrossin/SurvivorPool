@@ -422,13 +422,16 @@ def build_attrition_rows(entrants, elims_by_week, weeks):
     for week in sorted(weeks):
         out = elims_by_week.get(week, 0)
         entering = alive
-        alive = entering - out
+        # Clamped: inconsistent data would otherwise render a negative field
+        # size and a rate over 100%.
+        alive = max(0, entering - out)
         rows.append({
             "week": week,
             "entering": entering,
             "eliminated": out,
             "remaining": alive,
-            "pct_out": round(out / entering * 100, 1) if entering > 0 else 0.0,
+            "pct_out": round(min(out, entering) / entering * 100, 1)
+                       if entering > 0 else 0.0,
         })
     return rows
 
@@ -505,10 +508,6 @@ def get_attrition_series(season: int):
 
 def rank_doom_teams(rows):
     """Order (team, eliminations, first_week) triples for display.
-
-    `first_week` is the earliest week this team ended anyone's run - not the
-    team's worst week. TB's is 14 because that is when it first eliminated
-    someone, which is a different fact from where it did the most damage.
 
     Null-team rows are dropped: a missed pick eliminates a player but is not a
     team, and 2025 has 233 of them - they would top the ranking and mean

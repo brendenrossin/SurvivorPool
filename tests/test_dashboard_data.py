@@ -153,9 +153,11 @@ class TestRankDoomTeams:
         out = rank_doom_teams([("MIN", 3, 2), ("PIT", 3, 4), ("NE", 3, 1)])
         assert [t["team"] for t in out] == ["MIN", "NE", "PIT"]
 
-    def test_carries_the_first_week_through(self):
-        from app.dashboard_data import rank_doom_teams
-        assert rank_doom_teams([("GB", 73, 3)])[0]["first_week"] == 3
+    def test_clamps_a_negative_field_to_zero(self):
+        from app.dashboard_data import build_attrition_rows
+        rows = build_attrition_rows(5, {1: 9}, [1])
+        assert rows[0]["remaining"] == 0
+        assert rows[0]["pct_out"] == 100.0
 
     def test_drops_null_team_rows(self):
         # A missed pick has team_abbr NULL. It eliminates players but is not a

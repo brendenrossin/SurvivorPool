@@ -222,3 +222,25 @@ these on the strength of that sentence.
 - `Player.display_name.ilike(f"%{query}%")` does not escape `%` or `_`. Not SQL
   injection — SQLAlchemy binds the pattern — but a bare `%` enumerates the
   roster.
+
+## From the plots-overhaul tri-review (2026-09-04)
+
+Deferred from `feature/ui-plots-overhaul`. Everything Critical/High/Medium from
+that review was applied on the branch; these are what was judged not worth the
+change.
+
+- **`contrast_fill` linear-scans up to 200 steps** per bar per rerun
+  (`app/theme.py`). A binary search over lightness would be O(log n). Negligible
+  at ten bars, and the linear walk is easier to reason about — it returns the
+  *first* value clearing the floor, which is what "move only as far as it must"
+  means. Revisit only if it is ever applied per-cell to a large grid.
+- **The graveyard's `Game` outerjoin can fan out.** It matches on
+  `(home_team = pick OR away_team = pick) AND week AND season`, so a team with
+  two games in one week would duplicate that player's row. Measured against
+  production 2025: **251 rows for 251 eliminated players, zero duplicates.** The
+  NFL schedule makes this unreachable today; it would need a data error or a
+  format change. Fix if it ever bites: aggregate to one game per pick.
+- **`PENDING` and `INK_MUTED` are the same hex on the light palette**
+  (`#5B6880`). Deliberate for now — a pending badge and muted text want the same
+  weight on a light ground — but it means the two tokens cannot be tuned
+  independently without first splitting them.

@@ -68,7 +68,6 @@ def _lead_caption(rows):
     return f"{leader['team']} ended {leader['eliminations']} runs."
 
 
-@st.fragment
 def render_team_of_doom_widget(season):
     """Render the Team of Doom ranking."""
     st.markdown('<div class="eyebrow">Team of doom</div>', unsafe_allow_html=True)

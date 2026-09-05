@@ -164,8 +164,11 @@ def main():
                 '<div class="kpi-sub">survival rounds</div>',
                 unsafe_allow_html=True,
             )
-    except Exception:
+    except Exception as error:
+        # Never fail silently: the whole Key Stats row vanishing with no
+        # explanation is the exact thing this branch set out to remove.
         logging.exception("KPI row failed to render")
+        st.warning(f"Key stats are unavailable right now: {error}")
 
     # Live Scores - cards for the week the scoreboard should show. Deliberately
     # NOT the grid's week: the grid leads with the last week that kicked off,

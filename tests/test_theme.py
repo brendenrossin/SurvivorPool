@@ -166,3 +166,46 @@ class TestModulesImportCleanly:
     def test_module_imports(self, module):
         import importlib
         importlib.import_module(module)
+
+
+class TestConfigMatchesActivePalette:
+    """The light/dark switch has two halves: theme.ACTIVE, and .streamlit/
+    config.toml, which TOML cannot read from Python. Flipping one without the
+    other renders light components inside dark Streamlit chrome, so the drift
+    is pinned here rather than left to a comment."""
+
+    @staticmethod
+    def _config():
+        # Naive comment-stripping would eat the "#" of every hex colour.
+        import re
+        pattern = re.compile(r'^\s*(\w+)\s*=\s*"([^"]*)"')
+        values = {}
+        for line in open(".streamlit/config.toml"):
+            match = pattern.match(line)
+            if match:
+                values[match.group(1)] = match.group(2)
+        return values
+
+    def test_background_matches(self):
+        assert self._config()["backgroundColor"] == theme.SURFACE
+
+    def test_secondary_background_matches(self):
+        assert self._config()["secondaryBackgroundColor"] == theme.SURFACE_RAISED
+
+    def test_text_color_matches(self):
+        assert self._config()["textColor"] == theme.INK
+
+    def test_primary_matches_the_accent(self):
+        assert self._config()["primaryColor"] == theme.ACCENT
+
+    def test_base_matches_the_active_palette(self):
+        assert self._config()["base"] == theme.ACTIVE
+
+
+class TestLayoutCopyIsDeep:
+    def test_nested_axis_dicts_are_not_shared(self):
+        # A shallow copy lets one caller's mutation leak into every later chart
+        from app import mobile_plotly_config as mpc
+        first = mpc.get_mobile_layout("bar_chart")
+        first["xaxis"]["tickfont"]["color"] = "#FF0000"
+        assert mpc.get_mobile_layout("bar_chart")["xaxis"]["tickfont"]["color"] != "#FF0000"
