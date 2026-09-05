@@ -202,3 +202,33 @@ class TestSortingAndTimestamps:
         assert order == ["a", "b", "c"]
         assert order == [c["game_id"] for c in
                          build_scoreboard(list(reversed(games)), {}, {}, True)]
+
+
+class TestScoreboardIsCollapsible:
+    """A full slate is sixteen cards, which is most of a phone screen before
+    anything else on the page."""
+
+    SRC = open("app/live_scores.py").read()
+
+    def test_cards_render_inside_an_expander(self):
+        assert "st.expander(" in self.SRC
+
+    def test_it_opens_expanded(self):
+        # Collapsed by default would hide live scores during games, which is
+        # the one time this widget is the reason to open the page.
+        assert "expanded=True" in self.SRC
+
+    def test_the_label_carries_the_game_count(self):
+        # So the collapsed state still says what is in there
+        assert '{len(cards)} {plural}' in self.SRC
+
+    def test_the_label_pluralises(self):
+        assert 'plural = "game" if len(cards) == 1 else "games"' in self.SRC
+
+    def test_empty_states_stay_outside_the_expander(self):
+        # An expander labelled "0 games" hiding the reason is worse than the
+        # reason itself, so both early returns precede it.
+        expander_at = self.SRC.index("st.expander(")
+        for message in ("No week {week} schedule yet",
+                        "No week {week} game features a picked team"):
+            assert self.SRC.index(message) < expander_at

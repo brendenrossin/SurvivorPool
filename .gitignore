@@ -125,5 +125,10 @@ test_env/
 
 # Streamlit cache
 .streamlit/
+# ...but the app's theme is not a local preference: without it Streamlit takes
+# its base from the viewer's OS colour scheme and light-mode visitors get light
+# widgets on a dark page.
+!.streamlit/
+!.streamlit/config.toml
 # Local skill symlinks (absolute paths, machine-specific)
 .claude/skills/

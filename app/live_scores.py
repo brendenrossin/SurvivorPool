@@ -204,20 +204,18 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
         data["games"], data["pick_counts"], data["results"], reveal_picks
     )
 
-    st.markdown(f"### 🏈 Week {week}")
-
-    # Each empty state says WHY it is empty, not merely that it is.
+    # Each empty state says WHY it is empty, not merely that it is. These sit
+    # outside the expander: an expander labelled "0 games" hiding the reason is
+    # worse than the reason itself.
     if not data["games"]:
+        st.markdown(f"### Week {week}")
         st.info(
             f"**No week {week} schedule yet.** Games appear here once the score "
             "ingestion job has pulled this week's fixtures."
         )
         return
     if not cards:
-        # Reachable only with picks present and none of the picked teams
-        # playing: a bye week, or an abbreviation the sheet and the schedule
-        # disagree on. Sending the reader to check the sheet import would point
-        # them at the one thing that definitely worked.
+        st.markdown(f"### Week {week}")
         st.info(
             f"**No week {week} game features a picked team.** Every entrant is "
             "on a team that isn't playing this week — usually a bye, or a team "
@@ -225,19 +223,22 @@ def render_live_scores_widget(season: int, week: int, reveal_picks: bool) -> Non
         )
         return
 
-    if not reveal_picks:
-        st.caption(
-            "This week hasn't kicked off — showing the full slate. Pick counts "
-            "appear once the games start."
-        )
-    elif not any(card["has_picks"] for card in cards):
-        st.caption("No picks in yet — showing every game this week.")
+    # Collapsible: a full slate is sixteen cards, which is most of a phone
+    # screen before anything else on the page. The count is in the label so the
+    # collapsed state still says what is in there.
+    plural = "game" if len(cards) == 1 else "games"
+    with st.expander(f"Week {week} scoreboard - {len(cards)} {plural}",
+                     expanded=True):
+        if not reveal_picks:
+            st.caption(
+                "This week hasn't kicked off - showing the full slate. Pick "
+                "counts appear once the games start."
+            )
+        elif not any(card["has_picks"] for card in cards):
+            st.caption("No picks in yet - showing every game this week.")
 
-    # Four to a row: a card holds two team abbreviations and a kickoff time,
-    # so at two per row most of its width was empty. Streamlit stacks columns
-    # on a narrow viewport, so this is still one card per row on a phone.
-    for start in range(0, len(cards), CARDS_PER_ROW):
-        columns = st.columns(CARDS_PER_ROW, gap="small")
-        for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
-            with column:
-                _render_card(card)
+        for start in range(0, len(cards), CARDS_PER_ROW):
+            columns = st.columns(CARDS_PER_ROW, gap="small")
+            for column, card in zip(columns, cards[start:start + CARDS_PER_ROW]):
+                with column:
+                    _render_card(card)
