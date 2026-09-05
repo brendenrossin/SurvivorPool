@@ -462,3 +462,67 @@ def get_week_team_status(season: int, week: int) -> Dict[str, str]:
             db.close()
         except Exception:
             pass
+
+
+@st.cache_data(ttl=60)
+def get_week_game_statuses(season: int) -> Dict[int, List[str]]:
+    """{week: [game status, ...]} for a whole season."""
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        rows = db.query(Game.week, Game.status).filter(Game.season == season).all()
+        by_week: Dict[int, List[str]] = {}
+        for week, status in rows:
+            by_week.setdefault(week, []).append(status)
+        return by_week
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=60)
+def get_week_scoreboard(season: int, week: int) -> Dict:
+    """Games, pick counts and survival splits for one week, as plain dicts.
+
+    Returns plain data rather than ORM rows so the view layer stays free of the
+    session, and so the whole payload is cacheable.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        games = [{
+            "game_id": g.game_id, "status": g.status,
+            "home_team": g.home_team, "away_team": g.away_team,
+            "home_score": g.home_score, "away_score": g.away_score,
+            "winner_abbr": g.winner_abbr, "kickoff": g.kickoff,
+            "favorite_team": g.favorite_team, "point_spread": g.point_spread,
+        } for g in db.query(Game).filter(
+            Game.season == season, Game.week == week
+        ).order_by(Game.kickoff).all()]
+
+        counts = dict(db.query(Pick.team_abbr, func.count()).filter(
+            Pick.season == season, Pick.week == week,
+            Pick.team_abbr.isnot(None),
+        ).group_by(Pick.team_abbr).all())
+
+        results: Dict[str, Dict[str, int]] = {}
+        rows = db.query(PickResult.game_id, PickResult.survived, func.count()).join(
+            Pick, Pick.pick_id == PickResult.pick_id
+        ).filter(Pick.season == season, Pick.week == week).group_by(
+            PickResult.game_id, PickResult.survived
+        ).all()
+        for game_id, survived, count in rows:
+            split = results.setdefault(game_id, {"survived": 0, "eliminated": 0})
+            if survived is True:
+                split["survived"] += count
+            elif survived is False:
+                split["eliminated"] += count
+
+        return {"games": games, "pick_counts": counts, "results": results}
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass

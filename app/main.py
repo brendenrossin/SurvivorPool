@@ -34,6 +34,7 @@ from app.dashboard_data import (
     get_started_game_weeks,
     get_completed_week_count,
     get_week_team_status,
+    get_week_game_statuses,
     get_player_data,
     get_meme_stats,
     search_players
@@ -48,7 +49,7 @@ from app.picks_grid import (
     resolve_current_week,
     select_grid_rows,
 )
-from app.live_scores import render_live_scores_widget, render_compact_live_scores
+from app.live_scores import render_live_scores_widget, resolve_scoreboard_week
 from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
@@ -211,30 +212,24 @@ def main():
     except:
         pass
 
-    # Live Scores Widget
+    # Live Scores - cards for the week the scoreboard should show. Deliberately
+    # NOT the grid's week: the grid leads with the last week that kicked off,
+    # because that is the last week whose picks may be published; the scoreboard
+    # rolls forward once that week has finished.
     try:
-        from api.database import SessionLocal
-        from api.models import Game
-
-        # Get current week from database (NO API CALLS!)
-        db = SessionLocal()
-        try:
-            # Find the latest week with games in database
-            latest_week_result = db.query(Game.week).filter(
-                Game.season == SEASON
-            ).order_by(Game.week.desc()).first()
-
-            current_week = latest_week_result.week if latest_week_result else 1
-
-            # Render live scores widget (handles its own card-like styling with expander)
-            render_live_scores_widget(db, SEASON, current_week)
-        finally:
-            try:
-                db.close()
-            except:
-                pass
+        summary_preview = get_summary_data(SEASON)
+        week_statuses = get_week_game_statuses(SEASON)
+        played_week = resolve_current_week(
+            sorted(w["week"] for w in summary_preview["weeks"]) or [1],
+            get_started_game_weeks(SEASON),
+        )
+        scoreboard_week = resolve_scoreboard_week(played_week, week_statuses)
+        render_live_scores_widget(
+            SEASON, scoreboard_week, reveal_picks=scoreboard_week <= played_week
+        )
     except Exception as e:
-        st.info("🏈 Live scores will appear once data is populated")
+        logging.exception("Live scores failed to render")
+        st.info(f"🏈 Live scores are unavailable right now: {e}")
 
     st.divider()
 
