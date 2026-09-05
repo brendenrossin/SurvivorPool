@@ -12,9 +12,11 @@ from api import groupme, rate_limiter
 
 
 class FakeResponse:
-    def __init__(self, status_code, payload=None):
+    def __init__(self, status_code, payload=None, text="", headers=None):
         self.status_code = status_code
         self._payload = payload
+        self.text = text
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -45,6 +47,14 @@ def _no_rate_limit(monkeypatch):
     monkeypatch.setattr(groupme, "_get_rate_limiter", lambda: type("_L", (), {"wait_if_needed": lambda self: True})())
 
 
+@pytest.fixture(autouse=True)
+def sleeps(monkeypatch):
+    """Backoff is recorded, never spent - no test may sleep."""
+    recorded = []
+    monkeypatch.setattr(groupme, "_sleep", recorded.append)
+    return recorded
+
+
 def test_fetch_message_page_returns_messages(monkeypatch):
     monkeypatch.setattr(groupme.requests, "get",
                         lambda *a, **k: FakeResponse(200, _page(["3", "2", "1"])))
@@ -61,7 +71,7 @@ def test_iter_messages_pages_backward_until_exhausted(monkeypatch):
     pages = [_page(["5", "4"]), _page(["3", "2"]), None]
     calls = []
 
-    def fake_get(url, params=None, headers=None, timeout=None):
+    def fake_get(url, params=None, **kwargs):
         calls.append(params.get("before_id"))
         nxt = pages.pop(0)
         return FakeResponse(200, nxt) if nxt else FakeResponse(304)
@@ -70,14 +80,6 @@ def test_iter_messages_pages_backward_until_exhausted(monkeypatch):
     ids = [m["id"] for m in groupme.iter_messages("g1", "tok")]
     assert ids == ["5", "4", "3", "2"]
     assert calls == [None, "4", "2"]   # before_id is the oldest id of the prior page
-
-
-def test_iter_messages_stops_at_stop_before(monkeypatch):
-    """The poller only re-scans a trailing window; it must not walk all history."""
-    monkeypatch.setattr(groupme.requests, "get",
-                        lambda *a, **k: FakeResponse(200, _page(["9", "8", "7"])))
-    ids = [m["id"] for m in groupme.iter_messages("g1", "tok", stop_before="8")]
-    assert ids == ["9"]
 
 
 def test_http_error_raises_groupme_error(monkeypatch):
@@ -104,7 +106,7 @@ def test_token_is_sent_as_a_header_not_a_query_param(monkeypatch):
     """Keeping the secret out of the URL keeps it out of every log that records one."""
     seen = {}
 
-    def capture(url, params=None, headers=None, timeout=None):
+    def capture(url, params=None, headers=None, **kwargs):
         seen["params"] = params
         seen["headers"] = headers
         return FakeResponse(200, _page(["1"]))
@@ -114,6 +116,147 @@ def test_token_is_sent_as_a_header_not_a_query_param(monkeypatch):
 
     assert "token" not in (seen["params"] or {})
     assert seen["headers"]["X-Access-Token"] == "tok"
+
+
+def test_redirects_are_not_followed(monkeypatch):
+    """X-Access-Token is a custom header, so requests would forward it verbatim
+    to whatever host a redirect names - unlike Authorization, which it strips.
+    That token can read every group its owner belongs to."""
+    seen = {}
+
+    def capture(url, **kwargs):
+        seen.update(kwargs)
+        return FakeResponse(200, _page(["1"]))
+
+    monkeypatch.setattr(groupme.requests, "get", capture)
+    groupme.fetch_message_page("g1", "tok")
+
+    assert seen["allow_redirects"] is False
+
+
+def test_a_redirect_response_is_an_error_not_a_parse_attempt(monkeypatch):
+    """With redirects unfollowed, a 302 arrives as a response with no envelope."""
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(302, headers={"Location": "http://evil"}))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+    assert "302" in str(err.value)
+
+
+def test_error_body_is_included_for_the_operator(monkeypatch):
+    """HTTP 401 alone cannot distinguish a revoked token from a rejected auth
+    scheme, and header auth here is still unverified."""
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(401, text='{"meta":{"errors":["unauthorized"]}}'))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+    assert "401" in str(err.value)
+    assert "unauthorized" in str(err.value)
+
+
+def test_a_token_echoed_in_an_error_body_is_redacted(monkeypatch):
+    """An API echoing the credential back is exactly how a body leaks a secret."""
+    secret = "super-secret-token-value"
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(
+                            403, text=f'{{"error":"bad token {secret}"}}'))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", secret)
+    assert secret not in str(err.value)
+    assert "REDACTED" in str(err.value)
+
+
+def test_error_body_is_capped(monkeypatch):
+    monkeypatch.setattr(groupme.requests, "get",
+                        lambda *a, **k: FakeResponse(500, text="x" * 5000))
+    with pytest.raises(groupme.GroupMeError) as err:
+        groupme.fetch_message_page("g1", "tok")
+    assert len(str(err.value)) < groupme.ERROR_BODY_LIMIT + 100
+
+
+def test_429_is_retried_then_succeeds(monkeypatch, sleeps):
+    """The real GroupMe rate limit is unverified, so a 429 is likely rather
+    than hypothetical, and one must not abort a hundreds-of-pages walk."""
+    responses = [FakeResponse(429), FakeResponse(200, _page(["1"]))]
+    monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: responses.pop(0))
+
+    assert [m["id"] for m in groupme.fetch_message_page("g1", "tok")] == ["1"]
+    assert len(sleeps) == 1
+
+
+def test_5xx_is_retried_then_gives_up_as_groupme_error(monkeypatch, sleeps):
+    monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: FakeResponse(503))
+
+    with pytest.raises(groupme.GroupMeError):
+        groupme.fetch_message_page("g1", "tok")
+
+    assert len(sleeps) == groupme.MAX_ATTEMPTS - 1
+    assert sleeps == sorted(sleeps)                      # backoff, not a fixed pause
+    assert sum(sleeps) <= groupme.MAX_BACKOFF_SECONDS * groupme.MAX_ATTEMPTS
+
+
+def test_connection_errors_are_retried(monkeypatch, sleeps):
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise groupme.requests.ConnectionError("connection reset")
+        return FakeResponse(200, _page(["1"]))
+
+    monkeypatch.setattr(groupme.requests, "get", flaky)
+
+    assert [m["id"] for m in groupme.fetch_message_page("g1", "tok")] == ["1"]
+    assert len(sleeps) == 1
+
+
+def test_401_fails_fast_without_retrying(monkeypatch, sleeps):
+    """A revoked token fails identically on every attempt; retrying only delays
+    the job's failure and burns quota."""
+    calls = []
+
+    def counted(*a, **k):
+        calls.append(1)
+        return FakeResponse(401, text="unauthorized")
+
+    monkeypatch.setattr(groupme.requests, "get", counted)
+
+    with pytest.raises(groupme.GroupMeError):
+        groupme.fetch_message_page("g1", "tok")
+
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_retry_after_header_is_honoured(monkeypatch, sleeps):
+    responses = [FakeResponse(429, headers={"Retry-After": "5"}),
+                 FakeResponse(200, _page(["1"]))]
+    monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: responses.pop(0))
+
+    groupme.fetch_message_page("g1", "tok")
+
+    assert sleeps == [5.0]
+
+
+def test_a_wild_retry_after_cannot_park_the_job(monkeypatch, sleeps):
+    """A cron job parked for an hour on a header value is an outage."""
+    responses = [FakeResponse(429, headers={"Retry-After": "3600"}),
+                 FakeResponse(200, _page(["1"]))]
+    monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: responses.pop(0))
+
+    groupme.fetch_message_page("g1", "tok")
+
+    assert sleeps == [groupme.MAX_BACKOFF_SECONDS]
+
+
+def test_a_garbage_retry_after_falls_back_to_backoff(monkeypatch, sleeps):
+    responses = [FakeResponse(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}),
+                 FakeResponse(200, _page(["1"]))]
+    monkeypatch.setattr(groupme.requests, "get", lambda *a, **k: responses.pop(0))
+
+    groupme.fetch_message_page("g1", "tok")
+
+    assert sleeps == [groupme.BACKOFF_BASE_SECONDS]
 
 
 def test_groupme_does_not_share_espns_rate_limiter(monkeypatch):
@@ -133,6 +276,48 @@ def test_groupme_does_not_share_espns_rate_limiter(monkeypatch):
 def test_groupme_limiter_reads_its_own_env_var(monkeypatch):
     monkeypatch.setenv("GROUPME_MAX_REQUESTS_PER_MINUTE", "42")
     assert groupme._new_rate_limiter().max_requests_per_minute == 42
+
+
+def test_the_limiter_banner_names_groupme(monkeypatch, capsys):
+    """The whole point of the split is that throttle lines are attributable."""
+    monkeypatch.delenv("GROUPME_MAX_REQUESTS_PER_MINUTE", raising=False)
+    groupme._new_rate_limiter()
+
+    out = capsys.readouterr().out
+    assert "GroupMe API Rate Limiter" in out
+    assert "ESPN" not in out
+
+
+def test_espn_limiter_banner_is_unchanged():
+    """The label defaults to ESPN so every existing caller prints as before."""
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rate_limiter.APIRateLimiter(8, 300)
+
+    assert buf.getvalue() == "🛡️  ESPN API Rate Limiter: 8 req/min, 300s cache\n"
+
+
+def test_a_malformed_rate_limit_env_var_falls_back_to_the_default(monkeypatch, capsys):
+    """A Railway typo should not crash the cron with an unhandled ValueError."""
+    monkeypatch.setenv("GROUPME_MAX_REQUESTS_PER_MINUTE", "thirty")
+
+    limiter = groupme._new_rate_limiter()
+
+    assert limiter.max_requests_per_minute == groupme.DEFAULT_MAX_REQUESTS_PER_MINUTE
+    assert "GROUPME_MAX_REQUESTS_PER_MINUTE" in capsys.readouterr().out
+
+
+def test_a_nonpositive_rate_limit_is_clamped(monkeypatch, capsys):
+    """0 req/min makes the limiter wait out a full minute before every request."""
+    monkeypatch.setenv("GROUPME_MAX_REQUESTS_PER_MINUTE", "0")
+
+    limiter = groupme._new_rate_limiter()
+
+    assert limiter.max_requests_per_minute == groupme.MIN_MAX_REQUESTS_PER_MINUTE
+    assert "clamping" in capsys.readouterr().out
 
 
 def test_importing_the_module_builds_no_limiter():
@@ -157,7 +342,7 @@ def test_walk_state_reports_a_complete_walk(monkeypatch):
     """Exhausted history is not truncation - the backfill claims success here."""
     pages = [_page(["5", "4"]), None]
 
-    def fake_get(url, params=None, headers=None, timeout=None):
+    def fake_get(url, **kwargs):
         nxt = pages.pop(0)
         return FakeResponse(200, nxt) if nxt else FakeResponse(304)
 
@@ -180,17 +365,6 @@ def test_walk_state_reports_the_page_ceiling(monkeypatch):
 
     assert walk.stopped_at_ceiling is True
     assert walk.pages == 2
-
-
-def test_stop_before_is_not_reported_as_truncation(monkeypatch):
-    """Halting on the caller's own stop condition is a complete walk."""
-    monkeypatch.setattr(groupme.requests, "get",
-                        lambda *a, **k: FakeResponse(200, _page(["9", "8", "7"])))
-    walk = groupme.WalkState()
-
-    list(groupme.iter_messages("g1", "tok", stop_before="8", max_pages=1, walk=walk))
-
-    assert walk.stopped_at_ceiling is False
 
 
 def test_iter_messages_without_a_walk_behaves_as_before(monkeypatch):

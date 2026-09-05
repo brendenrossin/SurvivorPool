@@ -16,9 +16,8 @@ unsupported, reverting to a `token` query param is a one-line change; the
 redaction layer still protects logs from leaked secrets either way.
 """
 
-import io
 import os
-from contextlib import redirect_stdout
+import time
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
@@ -37,6 +36,27 @@ TIMEOUT = 30
 # 500-page ceiling to roughly 17 minutes of wall clock rather than an hour, which
 # is the difference between a Railway one-off job finishing and being killed.
 DEFAULT_MAX_REQUESTS_PER_MINUTE = 30
+
+# A limiter set to zero or a negative number would either spin or block forever,
+# so a misconfigured env var is clamped rather than honoured.
+MIN_MAX_REQUESTS_PER_MINUTE = 1
+
+# Retry budget. The real GroupMe rate limit is unverified (see the module
+# docstring), which makes a 429 likely rather than hypothetical, and a backfill
+# walk is hundreds of pages - one blip should not abort it. Three attempts with
+# 1s then 2s of backoff is at most 3s of extra wall clock per page, which the
+# rate limiter's own pacing already dwarfs.
+MAX_ATTEMPTS = 3
+BACKOFF_BASE_SECONDS = 1.0
+MAX_BACKOFF_SECONDS = 8.0
+
+# 429 is the only 4xx worth retrying; a 401 or a bad group id will fail exactly
+# the same way on the next attempt, so those fail fast.
+RETRYABLE_STATUS_CODES = frozenset({429})
+
+# Enough of a failing response body to tell a revoked token from a bad group id,
+# not enough to dump a page of HTML into job_meta.message.
+ERROR_BODY_LIMIT = 200
 
 _rate_limiter: Optional[APIRateLimiter] = None
 
@@ -57,6 +77,37 @@ class WalkState:
     stopped_at_ceiling: bool = False
 
 
+def _sleep(seconds: float) -> None:
+    """Indirection so tests can assert on backoff without spending it."""
+    time.sleep(seconds)
+
+
+def _max_requests_per_minute() -> int:
+    """GROUPME_MAX_REQUESTS_PER_MINUTE, validated.
+
+    A typo in a Railway variable should not crash the job with an unhandled
+    ValueError, and a 0 or negative value should not be honoured: it would make
+    the limiter wait out a full minute before every single request.
+    """
+    raw = os.getenv("GROUPME_MAX_REQUESTS_PER_MINUTE")
+    if raw is None or not raw.strip():
+        return DEFAULT_MAX_REQUESTS_PER_MINUTE
+
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        print(f"⚠️  GROUPME_MAX_REQUESTS_PER_MINUTE={raw!r} is not an integer; "
+              f"using the default of {DEFAULT_MAX_REQUESTS_PER_MINUTE} req/min")
+        return DEFAULT_MAX_REQUESTS_PER_MINUTE
+
+    if value < MIN_MAX_REQUESTS_PER_MINUTE:
+        print(f"⚠️  GROUPME_MAX_REQUESTS_PER_MINUTE={value} is below the minimum; "
+              f"clamping to {MIN_MAX_REQUESTS_PER_MINUTE} req/min")
+        return MIN_MAX_REQUESTS_PER_MINUTE
+
+    return value
+
+
 def _new_rate_limiter() -> APIRateLimiter:
     """Build GroupMe's own limiter from GROUPME_MAX_REQUESTS_PER_MINUTE.
 
@@ -66,17 +117,11 @@ def _new_rate_limiter() -> APIRateLimiter:
     throttle line in the logs, and pinned the backfill to ESPN's 8 req/min -
     about an hour of blocking sleep for a 500-page walk.
 
-    The class is reused as-is; only the instance is ours. Its constructor
-    prints an "ESPN API Rate Limiter" banner, which would misattribute this
-    limiter in exactly the way the split is meant to fix, so that line is
-    swallowed and an accurate one printed in its place.
+    The class is reused as-is; only the instance is ours. It takes the banner
+    label as an argument so this limiter announces itself accurately instead of
+    misattributing the limit to ESPN.
     """
-    max_requests = int(os.getenv("GROUPME_MAX_REQUESTS_PER_MINUTE",
-                                 str(DEFAULT_MAX_REQUESTS_PER_MINUTE)))
-    with redirect_stdout(io.StringIO()):
-        limiter = APIRateLimiter(max_requests)
-    print(f"🛡️  GroupMe API Rate Limiter: {max_requests} req/min")
-    return limiter
+    return APIRateLimiter(_max_requests_per_minute(), label="GroupMe API")
 
 
 def _get_rate_limiter() -> APIRateLimiter:
@@ -100,43 +145,120 @@ def _redact(text: str, token: str) -> str:
     return text.replace(token, "***REDACTED***") if token else text
 
 
+def _error_detail(resp, token: str) -> str:
+    """A failing response as an operator-readable, redacted one-liner.
+
+    The status code alone cannot distinguish a revoked token from a bad group
+    id from a rejected auth scheme - all of which are live possibilities while
+    header auth is unverified - so a short slice of the body comes along. It is
+    run through the same redaction as every other outbound string, because an
+    error body is one of the places an API is most likely to echo a credential
+    back at you.
+    """
+    try:
+        body = getattr(resp, "text", "") or ""
+    except Exception:
+        body = ""
+    body = _redact(body[:ERROR_BODY_LIMIT], token).strip()
+
+    detail = f"GroupMe returned HTTP {resp.status_code}"
+    return f"{detail}: {body}" if body else detail
+
+
+def _retry_after_seconds(resp) -> Optional[float]:
+    """The Retry-After header in seconds, if it is present and usable."""
+    if resp is None:
+        return None
+    headers = getattr(resp, "headers", None) or {}
+    try:
+        value = float(headers.get("Retry-After"))
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _retry_delay(attempt: int, resp=None) -> float:
+    """Exponential backoff, overridden by Retry-After when the server sends one.
+
+    Capped either way so a hostile or confused header cannot park a cron job
+    for an hour.
+    """
+    delay = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+    retry_after = _retry_after_seconds(resp)
+    if retry_after is not None:
+        delay = retry_after
+    return min(delay, MAX_BACKOFF_SECONDS)
+
+
+def _is_retryable(status_code: int) -> bool:
+    return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
+
+
 def fetch_message_page(group_id: str, token: str,
                        before_id: Optional[str] = None,
                        limit: int = PAGE_LIMIT) -> list[dict]:
-    """One page of messages, newest first. Empty list at the end of history."""
-    _get_rate_limiter().wait_if_needed()
+    """One page of messages, newest first. Empty list at the end of history.
 
+    Retries 429s, 5xx and connection errors a bounded number of times; every
+    other 4xx fails immediately, since a 401 or a bad group id will fail
+    identically on the next attempt.
+    """
     headers = {"X-Access-Token": token}
     params = {"limit": limit}
     if before_id:
         params["before_id"] = before_id
 
-    try:
-        resp = requests.get(f"{BASE_URL}/groups/{group_id}/messages",
-                            params=params, headers=headers, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        raise GroupMeError(f"GroupMe request failed: {_redact(str(exc), token)}") from exc
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        _get_rate_limiter().wait_if_needed()
 
-    if resp.status_code == 304:
-        return []
-    if resp.status_code >= 400:
-        raise GroupMeError(f"GroupMe returned HTTP {resp.status_code}")
+        try:
+            # allow_redirects=False because X-Access-Token is a custom header:
+            # requests strips the standard Authorization header on a cross-host
+            # redirect but forwards custom ones verbatim, so a redirect to any
+            # host would hand that host a long-lived credential that can read
+            # every group its owner belongs to. The messages endpoint has no
+            # legitimate reason to redirect.
+            resp = requests.get(f"{BASE_URL}/groups/{group_id}/messages",
+                                params=params, headers=headers, timeout=TIMEOUT,
+                                allow_redirects=False)
+        except requests.RequestException as exc:
+            if attempt < MAX_ATTEMPTS:
+                _sleep(_retry_delay(attempt))
+                continue
+            raise GroupMeError(
+                f"GroupMe request failed: {_redact(str(exc), token)}") from exc
 
-    return resp.json()["response"]["messages"]
+        if resp.status_code == 304:
+            return []
+
+        if 300 <= resp.status_code < 400:
+            # Not followed, on purpose - see the allow_redirects comment above.
+            raise GroupMeError(
+                f"GroupMe redirected (HTTP {resp.status_code}); not followed, "
+                f"because doing so would forward the access token to another host")
+
+        if resp.status_code >= 400:
+            if _is_retryable(resp.status_code) and attempt < MAX_ATTEMPTS:
+                _sleep(_retry_delay(attempt, resp))
+                continue
+            raise GroupMeError(_error_detail(resp, token))
+
+        return resp.json()["response"]["messages"]
+
+    # Unreachable: the final attempt either returns or raises above.
+    raise GroupMeError("GroupMe request failed after retries")
 
 
 def iter_messages(group_id: str, token: str,
-                  stop_before: Optional[str] = None,
                   max_pages: Optional[int] = None,
                   walk: Optional[WalkState] = None) -> Iterator[dict]:
     """Walk history backward, newest first.
 
+    There is deliberately no id-based stop condition. Both callers filter on
+    created_at instead, because favorite counts keep rising and a high-water
+    mark would freeze every count at its value seconds after posting.
+
     Args:
-        stop_before: stop as soon as this message id is yielded past - an
-            id-based halt for a caller that already knows where its history
-            begins. The poller does not use it: it filters on created_at
-            instead, because favorite counts keep rising and a high-water mark
-            would freeze every count at its value seconds after posting.
         max_pages: hard ceiling, so a bug cannot page forever.
         walk: optional WalkState, updated as the walk proceeds so the caller
             can tell a complete walk from one this ceiling truncated.
@@ -154,8 +276,6 @@ def iter_messages(group_id: str, token: str,
             walk.pages = pages
 
         for message in page:
-            if stop_before is not None and message["id"] == stop_before:
-                return      # caller's own stop condition, not truncation
             yield message
 
         before_id = page[-1]["id"]
