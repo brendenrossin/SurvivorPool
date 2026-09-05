@@ -284,12 +284,20 @@ class TestEliminatedCell:
             r, g, b = int(fill[1:3], 16), int(fill[3:5], 16), int(fill[5:7], 16)
             assert r == g == b, f"{team} -> {fill} kept a hue"
 
-    def test_it_holds_the_lightness_its_history_cells_take(self):
-        """Holding lightness constant is what proves the axes are different."""
+    def test_it_separates_from_history_in_lightness_too(self):
+        """An earlier version took history's exact luminance. That stated the
+        axes argument purely but left the fill sitting in the same pale band as
+        history on a light surface, with the border carrying the whole signal.
+        The approved design converges toward the middle instead."""
         for team in TEAM_COLORS:
             history = mute_color(team, LIGHT_SURFACE)
             fill = eliminated_fill(team, LIGHT_SURFACE)
-            assert abs(relative_luminance(fill) - relative_luminance(history)) < 0.02
+            assert contrast_ratio(fill, history) >= 1.45, f"{team} busted cell too close to history"
+
+    def test_every_busted_cell_lands_in_the_same_narrow_band(self):
+        """Elimination is a shared fate; identity lives in the row label."""
+        lums = [relative_luminance(eliminated_fill(t, LIGHT_SURFACE)) for t in TEAM_COLORS]
+        assert max(lums) - min(lums) < 0.30
 
     def test_it_never_equals_the_muted_history_colour(self):
         """The collision this whole design exists to prevent."""
@@ -302,10 +310,15 @@ class TestEliminatedCell:
             for team in TEAM_COLORS:
                 assert eliminated_fill(team, surface).lower() != team.lower()
 
-    def test_it_follows_the_surface(self):
-        """A light/dark reversal must be an argument change, not a rewrite."""
-        for team in TEAM_COLORS:
-            assert eliminated_fill(team, LIGHT_SURFACE) != eliminated_fill(team, DARK_SURFACE)
+    def test_it_separates_from_history_on_either_surface(self):
+        """The mid target needs no surface branch: it sits far from a light
+        surface and far from a dark one, so a light/dark reversal changes
+        nothing here. This is the property that has to survive, not sameness."""
+        for surface in (LIGHT_SURFACE, DARK_SURFACE):
+            for team in TEAM_COLORS:
+                fill = eliminated_fill(team, surface)
+                assert contrast_ratio(fill, mute_color(team, surface)) >= 1.45
+                assert contrast_ratio(fill, surface) >= 1.6
 
     def test_a_black_team_still_moves(self):
         """LV is already black; its history cell and its busted cell still differ."""

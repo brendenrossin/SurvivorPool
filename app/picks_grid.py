@@ -229,20 +229,37 @@ def _grey_at(luminance: float) -> str:
     return "#{0:02x}{0:02x}{0:02x}".format(value)
 
 
+ELIMINATED_LUMA = 0.42     # luminance every busted cell converges toward
+ELIMINATED_CONVERGE = 0.55  # how far toward it
+
+
 def eliminated_fill(hex_color: str, background: str) -> str:
     """Fill for a current-week pick whose game is lost.
 
-    It takes exactly the lightness this team's *history* cells take, with the
-    hue removed. That is the whole design in one line: history mutes on
-    lightness and keeps hue, elimination mutes on saturation and keeps
-    lightness. Holding lightness constant is what proves the two are different
-    axes rather than two points on one - which is what would have collapsed the
-    grid's primary encoding, since muted colour already means "an earlier week".
+    Drops hue entirely and pulls luminance toward a shared mid target, so every
+    busted cell lands on roughly the same grey. That is deliberate: elimination
+    is a shared fate, and identity already lives in the row label rather than
+    in the fill.
 
-    The surface enters only through mute_color(), which is already
-    parameterised, so a light/dark reversal costs an argument and nothing else.
+    History mutes on LIGHTNESS and keeps hue; this mutes on SATURATION. Two
+    different axes, which is what stops the grid's primary encoding collapsing
+    - muted colour already means "an earlier week".
+
+    Converging toward the middle rather than holding history's own lightness is
+    what makes it read. Holding it stated the axes argument more purely but put
+    the fill at the same luminance as the pale history band on a light surface,
+    leaving the border to carry the whole signal. The mid target is also why no
+    surface branch is needed: it sits far from a light surface and far from a
+    dark one, so it separates on both.
+
+    `background` is accepted for symmetry with mute_color and so a future
+    surface-dependent rule is not an API change.
     """
-    return _grey_at(relative_luminance(mute_color(hex_color, background)))
+    lum = (
+        relative_luminance(hex_color) * (1 - ELIMINATED_CONVERGE)
+        + ELIMINATED_LUMA * ELIMINATED_CONVERGE
+    )
+    return _grey_at(lum)
 
 
 def eliminated_edge(fill: str, danger: str = DANGER) -> str:
