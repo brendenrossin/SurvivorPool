@@ -245,6 +245,37 @@ current week, which neither history-muting (lightness) nor elimination-muting
 Accepted cost, looked at explicitly before ruling: `LV #000000` lifts to `#616161`.
 Black cannot be shown on black. Four picks in the 2025 season.
 
+
+### Rebase action: `contrast_fill` moves to `picks_grid`
+
+Session B lands `contrast_fill` in `app/picks_grid.py` alongside `contrast_ratio`,
+`ensure_contrast`, `eliminated_fill`, `eliminated_edge`, `cell_edge` and
+`history_ink`. Their reasoning is correct and is the argument this spec already
+makes for the other three helpers: `theme.py` imports the colour maths from
+`picks_grid` so it is not forked, and since `picks_grid` merges first it cannot
+import a module that does not yet exist on `staging`.
+
+The same constraint applies in reverse here, which is why this branch defines its
+own for now: it cannot import from a `picks_grid` it does not have. **At rebase,
+delete this branch's `contrast_fill` and re-export theirs**, keeping the dependency
+direction `theme -> picks_grid`.
+
+The two implementations were specified to the same behaviour — bidirectional,
+hue-preserving via HSL, minimal movement, identity when already passing — so the
+swap should be behaviour-neutral. `tests/test_theme.py` asserts all of those
+properties against the real 32 team colours and will validate theirs on contact.
+
+Also at rebase: `app/main.py:62` `APP_SURFACE = "#F8FAFC"` becomes
+`from app.theme import SURFACE`. `EMPHASIS_MIN_CONTRAST = 3.0` beside it stays a
+number — it is a WCAG threshold, not a colour.
+
+**Not adopted:** `INK_MUTED` for the grid's history ink. Session B's `history_ink(fill)`
+computes from the actual muted fill rather than from `SURFACE`, and history cells are
+not `SURFACE` — they are `mute_color(team, SURFACE)`, a per-team distance off it. Same
+reasoning as `DANGER`: a token calibrated against the surface is not the right answer
+for something sitting on a fill. `INK_MUTED` stays correct for this branch's widgets,
+which do sit on `SURFACE`.
+
 ### Emoji: removed, not reduced
 
 There are **103 emoji across the five files this branch touches**. They are a large
