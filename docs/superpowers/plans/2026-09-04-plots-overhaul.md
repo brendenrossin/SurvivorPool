@@ -18,7 +18,7 @@
 - **No emoji** in headings, labels, or row decoration. Status becomes a colour-coded text badge.
 - **No colour literals in component code.** Everything resolves through `app/theme.py`.
 - **Mobile-first:** every chart must survive a 390px viewport.
-- Run tests with: `NFL_SEASON=2026 PYTHONPATH=. .venv/bin/python -m pytest tests/ -q`
+- Run tests with: `DATABASE_URL="sqlite:///:memory:" NFL_SEASON=2026 PYTHONPATH=. .venv/bin/python -m pytest tests/ -q` (matches CI; the worktree has no `.env`, and `conftest` imports `api.models` which requires the variable)
 - Local run against real data:
   `export DATABASE_URL="$(grep -E '^DATABASE_PUBLIC_URL=' .env | cut -d= -f2-)"` then
   `NFL_SEASON=2025 PYTHONPATH=. .venv/bin/streamlit run app/main.py`.
