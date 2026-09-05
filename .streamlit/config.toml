@@ -1,0 +1,21 @@
+# The app's theme, and it MUST be committed - see the .gitignore exception.
+#
+# Without this file Streamlit picks its base theme from the viewer's OS colour
+# scheme. app/theme.py's CSS paints .stApp dark regardless, so a visitor whose
+# machine is in light mode gets light Streamlit widgets - toggles, radios,
+# dataframes - on a dark page, and the toggle track disappears entirely.
+# Setting the base makes the widget chrome deterministic.
+#
+# THIS FILE IS THE SECOND HALF OF THE LIGHT/DARK SWITCH. TOML cannot read
+# app/theme.py, so flipping theme.ACTIVE is NOT sufficient on its own - these
+# five values must change to match PALETTES[ACTIVE] in the same commit.
+# tests/test_theme.py::TestConfigMatchesActivePalette fails if they drift.
+[theme]
+base = "dark"
+primaryColor = "#F59E0B"
+backgroundColor = "#0B1220"
+secondaryBackgroundColor = "#141E33"
+textColor = "#E8EDF7"
+
+[server]
+headless = true

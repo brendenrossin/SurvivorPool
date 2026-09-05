@@ -174,6 +174,30 @@ class TestConfigMatchesActivePalette:
     other renders light components inside dark Streamlit chrome, so the drift
     is pinned here rather than left to a comment."""
 
+    def test_the_config_file_is_tracked_by_git(self):
+        """It shipped untracked once.
+
+        .streamlit/ is gitignored, so `git add -A` skipped config.toml
+        silently and production ran without it for a release - Streamlit then
+        takes its base theme from the VIEWER's OS colour scheme, and a
+        light-mode visitor gets light widgets on a dark page. Every other
+        assertion in this class passed throughout, because the file existed
+        locally. Only its absence from the index was the bug.
+        """
+        import subprocess
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", ".streamlit/config.toml"],
+            capture_output=True, text=True,
+        )
+        assert tracked.returncode == 0, (
+            ".streamlit/config.toml is not tracked by git. .streamlit/ is "
+            "gitignored; the exception in .gitignore must be kept."
+        )
+
+    def test_the_config_file_exists(self):
+        import pathlib
+        assert pathlib.Path(".streamlit/config.toml").is_file()
+
     @staticmethod
     def _config():
         # Naive comment-stripping would eat the "#" of every hex colour.
