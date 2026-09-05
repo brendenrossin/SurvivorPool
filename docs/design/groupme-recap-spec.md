@@ -160,6 +160,41 @@ the first sentence a lot, the rest is ehh."* So the instruction is not "be conci
 "land one angle and stop" - explicitly no stat recitation after the opening, and no
 closing line that draws a lesson from what was just said.
 
+### The bot performs Travis's function in the group's register
+
+The owner, after reading the real corpus: *"it should be sort of performing the
+functionality of Travis but in the sort of jabby vibe of the group."*
+
+This resolves a tension the live data exposed. 2,145 human messages from the 2025
+season were pulled and ranked by likes. Two facts fell out:
+
+**The best-liked material is reactive.** It lands because it answers someone else's
+misfortune in real time - a two-word "Ope" took 21 likes. The recap bot posts
+standalone and unprompted, so it can never do what the top of the corpus does.
+
+**The only entrant who posts standalone is the commissioner**, and his register is
+the announcement voice ("Quick recap with week 1 in the books: 251 total entries!")
+which the owner explicitly does not want copied.
+
+So neither half of the corpus can be imitated directly. The bot takes the
+commissioner's **function** - the one standalone weekly post nobody else makes - and
+the field's **register**: very short, profane by default, deadpan rather than
+joke-shaped, last-name direct address, fatalistic about one's own elimination, no
+windup and no sign-off.
+
+This is why "voice reference, never content reuse" is **structurally necessary**
+rather than merely cautious. There is no message in the corpus the bot could copy,
+because no message in the corpus does the bot's job.
+
+**Two constraints the corpus adds:**
+
+- *"The purge"* is a live, organic bit for the weekly eliminations - not
+  commissioner-issued. A callback that lands here is earned rather than forced.
+- **The bot is barred from political jabs.** Entrants make them and get liked for
+  them. Few-shot examples will otherwise teach the model that they are rewarded.
+  This is the same class as the emoji rule: the corpus shows what the humans do, and
+  the bot deliberately does not do all of it.
+
 ### Naming individuals
 
 The owner's rule: *"we should know who 'that one guy' is from our data and call him out
@@ -360,6 +395,7 @@ at most, so the hit rate is structurally zero. Adding it would be cargo cult.
 | `ANTHROPIC_API_KEY` | ✓ | ✓ |
 | `RECAP_MODEL` | tunable | tunable |
 | `RECAP_DRY_RUN` | default `true` | `false` |
+| `RECAP_ENABLED` | `true` | `true` |
 
 Staging reads the **real** chat, because a voice test against a corpus of test messages
 tests nothing. Reading cannot annoy anyone.
@@ -368,6 +404,15 @@ Staging posts to a **separate** group. Because a `bot_id` is bound to its group 
 creation, staging's bot has no code path that reaches the real chat — not with a bad
 config, not with a wrong `ENVIRONMENT` value. That is a stronger guarantee than a
 runtime flag, and `RECAP_DRY_RUN` sits on top of it rather than replacing it.
+
+`RECAP_ENABLED` is a kill switch, and it is deliberately separate from
+`RECAP_DRY_RUN`. They answer different questions: dry-run still generates and logs a
+recap so it can be read and tuned; `RECAP_ENABLED=false` skips the work entirely. The
+owner's framing - *"this very well is probably overkill but we can see what sticks and
+just have a flag to turn it on/off"* - is the reason it exists. If the bot is not
+landing mid-season it is turned off by changing one Railway variable, with no deploy,
+no revert, and no code change. That cheap exit is what makes shipping this
+speculative feature reasonable in the first place.
 
 Per the environment notes in `CLAUDE.md`, these must be set on the service that runs
 scores in each environment (`Scores-Cron` / `Scores-Cron-Prod`), and the CLI can `--set`
