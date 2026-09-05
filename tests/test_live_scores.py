@@ -184,3 +184,21 @@ class TestSortingAndTimestamps:
         ]
         cards = build_scoreboard(games, {}, {}, reveal_picks=True)
         assert [c["game_id"] for c in cards] == ["none", "naive", "aware"]
+
+    def test_games_sharing_a_kickoff_keep_a_stable_order(self):
+        """Most of a Sunday slate kicks off at the same minute. Without a total
+        ordering those ties fall back to database row order and the cards
+        shuffle between reruns."""
+        at = datetime(2025, 12, 7, 18, 0, tzinfo=timezone.utc)
+        base = dict(status="final", home_score=20, away_score=10,
+                    winner_abbr=None, favorite_team=None, point_spread=None,
+                    kickoff=at)
+        games = [
+            dict(base, game_id="c", home_team="TB", away_team="NO"),
+            dict(base, game_id="a", home_team="KC", away_team="DEN"),
+            dict(base, game_id="b", home_team="SEA", away_team="ATL"),
+        ]
+        order = [c["game_id"] for c in build_scoreboard(games, {}, {}, True)]
+        assert order == ["a", "b", "c"]
+        assert order == [c["game_id"] for c in
+                         build_scoreboard(list(reversed(games)), {}, {}, True)]

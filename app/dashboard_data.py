@@ -5,7 +5,12 @@ Data fetching functions for Streamlit dashboard
 import os
 import json
 import streamlit as st
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
+    from typing import TypedDict
+except ImportError:  # pragma: no cover
+    TypedDict = None
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, text, select
 from datetime import datetime
@@ -482,8 +487,21 @@ def get_week_game_statuses(season: int) -> Dict[int, List[str]]:
             pass
 
 
+class Scoreboard(TypedDict):
+    """One week's scoreboard payload.
+
+    `games` rows carry the ten Game columns build_scoreboard reads;
+    `pick_counts` is {team: picks}; `results` is {game_id: {"survived": n,
+    "eliminated": n}}.
+    """
+
+    games: List[Dict[str, Any]]
+    pick_counts: Dict[str, int]
+    results: Dict[str, Dict[str, int]]
+
+
 @st.cache_data(ttl=60)
-def get_week_scoreboard(season: int, week: int) -> Dict:
+def get_week_scoreboard(season: int, week: int) -> Scoreboard:
     """Games, pick counts and survival splits for one week, as plain dicts.
 
     Returns plain data rather than ORM rows so the view layer stays free of the
@@ -492,15 +510,22 @@ def get_week_scoreboard(season: int, week: int) -> Dict:
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
+        # Columns, not whole ORM rows: every one of these is projected straight
+        # into a dict on the next line, so hydrating Game instances and an
+        # identity map buys nothing. No order_by either - build_scoreboard
+        # sorts unconditionally.
         games = [{
-            "game_id": g.game_id, "status": g.status,
-            "home_team": g.home_team, "away_team": g.away_team,
-            "home_score": g.home_score, "away_score": g.away_score,
-            "winner_abbr": g.winner_abbr, "kickoff": g.kickoff,
-            "favorite_team": g.favorite_team, "point_spread": g.point_spread,
-        } for g in db.query(Game).filter(
-            Game.season == season, Game.week == week
-        ).order_by(Game.kickoff).all()]
+            "game_id": game_id, "status": status,
+            "home_team": home_team, "away_team": away_team,
+            "home_score": home_score, "away_score": away_score,
+            "winner_abbr": winner_abbr, "kickoff": kickoff,
+            "favorite_team": favorite_team, "point_spread": point_spread,
+        } for (game_id, status, home_team, away_team, home_score, away_score,
+               winner_abbr, kickoff, favorite_team, point_spread) in db.query(
+            Game.game_id, Game.status, Game.home_team, Game.away_team,
+            Game.home_score, Game.away_score, Game.winner_abbr, Game.kickoff,
+            Game.favorite_team, Game.point_spread,
+        ).filter(Game.season == season, Game.week == week).all()]
 
         counts = dict(db.query(Pick.team_abbr, func.count()).filter(
             Pick.season == season, Pick.week == week,

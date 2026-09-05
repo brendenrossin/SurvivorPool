@@ -129,9 +129,13 @@ def build_scoreboard(
             "survived": split.get("survived", 0),
         })
 
+    # game_id last so the order is total. Most of a Sunday slate shares one
+    # kickoff, and without it those ties fall back to whatever order the
+    # database returned - so cards could shuffle between reruns.
     cards.sort(key=lambda c: (
         STATUS_ORDER.get(c["status"], 3),
         _as_utc(c["kickoff"]) or datetime.min.replace(tzinfo=timezone.utc),
+        c["game_id"],
     ))
     return cards
 

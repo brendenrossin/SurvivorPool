@@ -189,6 +189,7 @@ def mute_color(hex_color: str, background: str, amount: float = HISTORY_MIX) -> 
 DANGER = "#B91C1C"
 
 WCAG_GRAPHIC_MIN = 3.0   # WCAG 2.1 non-text contrast floor
+CONTRAST_STEP = 0.05     # granularity of the ensure_contrast search
 
 
 def contrast_ratio(a: str, b: str) -> float:
@@ -212,10 +213,11 @@ def ensure_contrast(
         return color
 
     # Move away from the fill: darken on a light fill, lighten on a dark one.
-    # Twenty 5% steps reach pure black or white, so this always terminates.
+    # The count is derived from the step so the two cannot drift apart and
+    # leave the loop stopping short of the endpoint.
     toward = "#000000" if relative_luminance(against) > relative_luminance(color) else "#ffffff"
-    for step in range(1, 21):
-        candidate = mute_color(color, toward, 1 - step * 0.05)
+    for step in range(1, int(1 / CONTRAST_STEP) + 1):
+        candidate = mute_color(color, toward, 1 - step * CONTRAST_STEP)
         if contrast_ratio(candidate, against) >= minimum:
             return candidate
     return toward
@@ -437,7 +439,11 @@ def build_picks_grid(
 
     for row_idx, team in enumerate(rows):
         base = team_colors.get(team, "#666666")
+        # Hoisted: history's fill, hairline and ink are identical for every
+        # earlier week in the row, so computing them per cell repeated the same
+        # answer up to seventeen times.
         muted = mute_color(base, background)
+        muted_edge, muted_ink = cell_edge(muted, background), history_ink(muted)
 
         for col_idx, week in enumerate(weeks):
             n = counts.get((week, team), 0)
@@ -459,8 +465,7 @@ def build_picks_grid(
                 )
                 edge, edge_width, ink = cell_edge(fill, background), 1, label_ink(fill)
             else:
-                fill = muted
-                edge, edge_width, ink = cell_edge(fill, background), 1, history_ink(fill)
+                fill, edge, edge_width, ink = muted, muted_edge, 1, muted_ink
 
             shapes.append(dict(
                 type="rect", xref="x", yref="y",
