@@ -236,17 +236,22 @@ def main():
 
     # Each widget reads through a cached function in dashboard_data, so these
     # tab bodies no longer open a session apiece on every script run.
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["Team of Doom", "Survivors", "Graveyard", "Elimination Tracker"]
+    tabs = st.tabs(["Team of Doom", "Survivors", "Graveyard", "Elimination Tracker"])
+    panels = (
+        ("Team of Doom", render_team_of_doom_widget),
+        ("Survivors", render_survivors_widget),
+        ("Graveyard", render_graveyard_widget),
+        ("Elimination Tracker", render_chaos_meter_widget),
     )
-    with tab1:
-        render_team_of_doom_widget(SEASON)
-    with tab2:
-        render_survivors_widget(SEASON)
-    with tab3:
-        render_graveyard_widget(SEASON)
-    with tab4:
-        render_chaos_meter_widget(SEASON)
+    for tab, (name, render) in zip(tabs, panels):
+        with tab:
+            try:
+                render(SEASON)
+            except Exception as error:
+                # One panel failing must not take out the others, and it must
+                # say so rather than showing a raw traceback.
+                logging.exception("%s failed to render", name)
+                st.warning(f"{name} is unavailable right now: {error}")
 
     # Footer with update times
     render_footer(summary.get("last_updates", {}))

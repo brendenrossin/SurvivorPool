@@ -146,9 +146,13 @@ class TestMainWiring:
         assert "SessionLocal()" not in self._my_regions()
 
     def test_widgets_are_called_without_a_db_handle(self):
+        # The renderers are dispatched from a tuple now, so assert the property
+        # rather than a literal call string: nothing is handed a session.
         for name in ("render_team_of_doom_widget", "render_survivors_widget",
                      "render_graveyard_widget", "render_chaos_meter_widget"):
-            assert f"{name}(SEASON)" in self.SRC
+            assert name in self.SRC
+            assert f"{name}(db" not in self.SRC
+            assert f"{name}(SESSION" not in self.SRC
 
     def test_kpi_row_carries_the_sparkline(self):
         assert "build_sparkline" in self.SRC
@@ -163,3 +167,17 @@ class TestMainWiring:
             mine = mine.replace(skip, "")
         offenders = sorted({ch for ch in mine if ord(ch) >= 0x2500})
         assert not offenders, offenders
+
+
+class TestInsightsTabsAreIsolated:
+    """One panel raising must not take out the other three, and must say so
+    rather than surfacing a traceback."""
+
+    SRC = open("app/main.py").read()
+
+    def test_each_panel_render_is_guarded(self):
+        assert "render(SEASON)" in self.SRC
+        assert "is unavailable right now" in self.SRC
+
+    def test_failure_is_logged_with_the_panel_name(self):
+        assert 'logging.exception("%s failed to render", name)' in self.SRC
