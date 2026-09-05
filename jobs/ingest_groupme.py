@@ -13,12 +13,12 @@ from datetime import datetime, timedelta, timezone
 
 from api.chat_store import upsert_messages
 from api.database import SessionLocal
-from api.groupme import GroupMeError, iter_messages
-from api.models import ChatMessage
+from api.groupme import PAGE_LIMIT, GroupMeError, iter_messages
 from jobs.sheets_ingestion_shared import record_job_run
 
 INGEST_GROUPME_JOB_NAME = "ingest_groupme"
 RESCAN_DAYS = 14
+MAX_RESCAN_PAGES = 50   # 5,000 messages; a ceiling, not an expectation
 
 
 def _credentials() -> tuple[str, str]:
@@ -45,11 +45,23 @@ def run(days: int = RESCAN_DAYS) -> tuple[int, int]:
         cutoff = rescan_window_start(days=days)
         try:
             batch = []
-            for message in iter_messages(group_id, token):
+            total_seen = 0
+            reached_window_edge = False
+            for message in iter_messages(group_id, token, max_pages=MAX_RESCAN_PAGES):
+                total_seen += 1
                 created = datetime.fromtimestamp(message["created_at"], tz=timezone.utc)
                 if created < cutoff:
+                    reached_window_edge = True
                     break
                 batch.append(message)
+
+            if not reached_window_edge and total_seen >= MAX_RESCAN_PAGES * PAGE_LIMIT:
+                # The page ceiling stopped the walk before it reached the
+                # window edge, not the cutoff check - so the window was not
+                # fully covered and some favorite counts may be stale.
+                print(f"⚠️ GroupMe: hit the {MAX_RESCAN_PAGES}-page ceiling before "
+                      f"reaching the {days}-day window edge; some favorite counts "
+                      f"may not have refreshed this run")
 
             inserted, updated = upsert_messages(db, batch)
         except (GroupMeError, RuntimeError) as exc:

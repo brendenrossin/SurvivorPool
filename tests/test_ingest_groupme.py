@@ -6,7 +6,7 @@ seconds after posting. It re-reads a trailing window instead and lets the
 upsert refresh what changed.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -85,3 +85,43 @@ def test_missing_credentials_is_a_clear_error(job_db, monkeypatch):
     monkeypatch.delenv("GROUPME_ACCESS_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="GROUPME_ACCESS_TOKEN"):
         ingest_groupme.run()
+
+
+def test_run_stops_at_the_trailing_window_edge(job_db, monkeypatch):
+    """The window is this job's whole design: re-read recent messages so their
+    favorite counts refresh, then stop rather than re-walk the season.
+
+    Nothing covered this branch before, which also left it as the only bound
+    on the walk - see test_run_bounds_the_walk_with_a_page_ceiling.
+    """
+    now = int(datetime.now(timezone.utc).timestamp())
+    inside = now - int(timedelta(days=1).total_seconds())
+    outside = now - int(timedelta(days=30).total_seconds())
+
+    monkeypatch.setattr(
+        ingest_groupme, "iter_messages",
+        lambda *a, **k: iter([
+            raw("recent", created=inside),
+            raw("old", created=outside),
+            raw("older", created=outside - 100),
+        ]))
+
+    inserted, _ = ingest_groupme.run(days=14)
+
+    assert inserted == 1
+    assert [r.message_id for r in job_db.query(ChatMessage).all()] == ["recent"]
+
+
+def test_run_bounds_the_walk_with_a_page_ceiling(job_db, monkeypatch):
+    """Without a ceiling, a cutoff that failed to fire would re-walk the whole
+    group history every run against a rate-limited API."""
+    seen = {}
+
+    def capture(group_id, token, **kwargs):
+        seen.update(kwargs)
+        return iter([raw("m1")])
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", capture)
+    ingest_groupme.run()
+
+    assert seen["max_pages"] == ingest_groupme.MAX_RESCAN_PAGES
