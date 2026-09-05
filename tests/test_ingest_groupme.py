@@ -6,10 +6,13 @@ seconds after posting. It re-reads a trailing window instead and lets the
 upsert refresh what changed.
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from api.groupme import WalkState
+from api.job_locks import LOCK_GROUPME_INGESTION, LOCK_INGESTION_AND_SCORING
 from api.models import ChatMessage, JobMeta
 from jobs import ingest_groupme
 
@@ -150,3 +153,141 @@ def test_run_bounds_the_walk_with_a_page_ceiling(job_db, monkeypatch):
     ingest_groupme.run()
 
     assert seen["max_pages"] == ingest_groupme.MAX_RESCAN_PAGES
+
+
+def _ceiling_walk(*messages):
+    """A walk the page ceiling truncated, as iter_messages reports it."""
+    def walking(group_id, token, max_pages=None, walk=None, **kwargs):
+        for message in messages:
+            yield message
+        walk.stopped_at_ceiling = True
+    return walking
+
+
+def test_ceiling_truncation_warns_and_is_not_a_success(job_db, monkeypatch, capsys):
+    """The old detection inferred truncation from `total_seen >= MAX_RESCAN_PAGES
+    * PAGE_LIMIT`, which is a guaranteed false negative whenever any page comes
+    back short of PAGE_LIMIT - which GroupMe does routinely. WalkState is the
+    only reliable signal.
+    """
+    monkeypatch.setattr(ingest_groupme, "iter_messages", _ceiling_walk(raw("m1")))
+    ingest_groupme.run()
+
+    out = capsys.readouterr().out
+    assert "ceiling" in out
+    assert "✅" not in out
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status != "success"
+    assert meta.last_success_at is None
+    # The window was not covered, but what it did fetch is still stored.
+    assert job_db.query(ChatMessage).count() == 1
+
+
+def test_no_ceiling_warning_when_history_simply_ran_out(job_db, monkeypatch, capsys):
+    """One short page is the normal case, not a truncated walk."""
+    def walking(group_id, token, max_pages=None, walk=None, **kwargs):
+        yield raw("m1")
+        # walk.stopped_at_ceiling stays False: iter_messages returns early when
+        # a page comes back empty.
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", walking)
+    ingest_groupme.run()
+
+    out = capsys.readouterr().out
+    assert "ceiling" not in out
+    assert "✅ GroupMe: 1 new, 0 refreshed" in out
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "success"
+
+
+def test_no_ceiling_warning_when_the_window_edge_stopped_the_walk(job_db, monkeypatch,
+                                                                 capsys):
+    """Stopping at the cutoff abandons the generator before it can ever set the
+    ceiling flag - the case the old heuristic got right and this must keep."""
+    now = int(datetime.now(timezone.utc).timestamp())
+    outside = now - int(timedelta(days=30).total_seconds())
+
+    monkeypatch.setattr(
+        ingest_groupme, "iter_messages",
+        _ceiling_walk(raw("recent"), raw("old", created=outside)))
+    ingest_groupme.run(days=14)
+
+    assert "ceiling" not in capsys.readouterr().out
+
+
+def test_run_passes_a_walk_state_to_the_client(job_db, monkeypatch):
+    """Dropping the argument silently restores the false-negative heuristic."""
+    seen = {}
+
+    def capture(group_id, token, **kwargs):
+        seen.update(kwargs)
+        return iter([raw("m1")])
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", capture)
+    ingest_groupme.run()
+
+    assert isinstance(seen["walk"], WalkState)
+
+
+def test_run_takes_the_groupme_advisory_lock(job_db, monkeypatch):
+    """Without it, a Railway retry firing while the previous run is still in
+    flight collides on the message_id primary key mid-batch."""
+    seen = []
+
+    @contextmanager
+    def fake_lock(db, lock_id, **kwargs):
+        seen.append(lock_id)
+        yield
+
+    monkeypatch.setattr(ingest_groupme, "advisory_lock", fake_lock)
+    monkeypatch.setattr(ingest_groupme, "iter_messages",
+                        lambda *a, **k: iter([raw("m1")]))
+    ingest_groupme.run()
+
+    assert seen == [LOCK_GROUPME_INGESTION]
+    assert LOCK_GROUPME_INGESTION != LOCK_INGESTION_AND_SCORING
+
+
+def test_a_busy_lock_is_skipped_not_an_error(job_db, monkeypatch):
+    """A busy lock is normal operation, so it must not write an `error` row that
+    masks a real failure from monitoring."""
+    @contextmanager
+    def busy(db, lock_id, **kwargs):
+        raise RuntimeError(
+            f"Could not acquire advisory lock {lock_id} - another job is running.")
+        yield   # pragma: no cover
+
+    monkeypatch.setattr(ingest_groupme, "advisory_lock", busy)
+    monkeypatch.setattr(ingest_groupme, "iter_messages",
+                        lambda *a, **k: pytest.fail("must not fetch while locked"))
+
+    assert ingest_groupme.run() == (0, 0)
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "skipped"
+    assert meta.last_success_at is None
+
+
+def test_a_failure_partway_through_keeps_committed_batches(job_db, monkeypatch):
+    """The poller used to accumulate the whole trailing window - up to 5,000
+    messages - into one list and one transaction, so a single bad row threw away
+    the entire run's work."""
+    monkeypatch.setattr(ingest_groupme, "BATCH_SIZE", 2)
+
+    def walking(*a, **k):
+        yield raw("m1")
+        yield raw("m2")
+        yield raw("m3")
+        raise KeyError("envelope changed")
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", walking)
+    with pytest.raises(KeyError):
+        ingest_groupme.run()
+
+    # m1 and m2 committed as a full batch; m3 was still pending and rolled back.
+    assert sorted(r.message_id for r in job_db.query(ChatMessage).all()) == ["m1", "m2"]

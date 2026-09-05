@@ -17,9 +17,12 @@ outage began>; re-running this poller will not recover it.
 import os
 from datetime import datetime, timedelta, timezone
 
-from api.chat_store import upsert_messages
 from api.database import SessionLocal
-from api.groupme import PAGE_LIMIT, GroupMeError, iter_messages
+from api.groupme import GroupMeError, WalkState, iter_messages
+from api.job_locks import LOCK_GROUPME_INGESTION, advisory_lock
+from jobs.groupme_shared import (BATCH_SIZE, STATUS_INCOMPLETE,
+                                 is_lock_contention, messages_until,
+                                 store_in_batches, unexpected_error_message)
 from jobs.sheets_ingestion_shared import record_job_run
 
 INGEST_GROUPME_JOB_NAME = "ingest_groupme"
@@ -46,34 +49,63 @@ def run(days: int = RESCAN_DAYS) -> tuple[int, int]:
     """Fetch and upsert the trailing window. Returns (inserted, updated)."""
     token, group_id = _credentials()
 
+    # The session is opened before the network walk on purpose. The advisory
+    # lock has to be held for the whole fetch to actually exclude a concurrent
+    # run, and an exception mid-walk has to be able to reach job_meta. What the
+    # batching below buys is that the session is no longer idle-IN-TRANSACTION
+    # across the whole rate-limited walk: each batch commit ends the
+    # transaction, so the longest open transaction is one batch of paging.
     db = SessionLocal()
     try:
         cutoff = rescan_window_start(days=days)
+        walk = WalkState()
         try:
-            batch = []
-            total_seen = 0
-            reached_window_edge = False
-            for message in iter_messages(group_id, token, max_pages=MAX_RESCAN_PAGES):
-                total_seen += 1
-                created = datetime.fromtimestamp(message["created_at"], tz=timezone.utc)
-                if created < cutoff:
-                    reached_window_edge = True
-                    break
-                batch.append(message)
+            with advisory_lock(db, LOCK_GROUPME_INGESTION):
+                inserted, updated = store_in_batches(
+                    db,
+                    messages_until(
+                        iter_messages(group_id, token,
+                                      max_pages=MAX_RESCAN_PAGES, walk=walk),
+                        cutoff),
+                    batch_size=BATCH_SIZE)
 
-            if not reached_window_edge and total_seen >= MAX_RESCAN_PAGES * PAGE_LIMIT:
-                # The page ceiling stopped the walk before it reached the
-                # window edge, not the cutoff check - so the window was not
-                # fully covered and some favorite counts may be stale.
-                print(f"⚠️ GroupMe: hit the {MAX_RESCAN_PAGES}-page ceiling before "
-                      f"reaching the {days}-day window edge; some favorite counts "
-                      f"may not have refreshed this run")
+                # WalkState is the only reliable signal here. The old heuristic
+                # - "did we see MAX_RESCAN_PAGES * PAGE_LIMIT messages?" - was a
+                # guaranteed false negative whenever any page came back short of
+                # PAGE_LIMIT, which GroupMe does routinely.
+                if walk.stopped_at_ceiling:
+                    print(f"⚠️ GroupMe: hit the {MAX_RESCAN_PAGES}-page ceiling "
+                          f"before reaching the {days}-day window edge; some "
+                          f"favorite counts may not have refreshed this run")
+                    # Not "success": the window was not fully covered, so
+                    # last_success_at must not advance on the strength of it.
+                    record_job_run(
+                        db, INGEST_GROUPME_JOB_NAME, STATUS_INCOMPLETE,
+                        f"{inserted} new, {updated} refreshed; stopped at the "
+                        f"{MAX_RESCAN_PAGES}-page ceiling before the "
+                        f"{days}-day window edge")
+                    return inserted, updated
 
-            inserted, updated = upsert_messages(db, batch)
-            db.commit()     # upsert_messages leaves the transaction to us
-        except (GroupMeError, RuntimeError) as exc:
-            # Both are ours and already safe: GroupMeError is redacted at its
-            # raise site in api/groupme.py, RuntimeError is our own literal.
+                # record_job_run() commits, which is also what commits the
+                # trailing partial batch store_in_batches() left pending - the
+                # rows and the bookkeeping land together.
+                record_job_run(db, INGEST_GROUPME_JOB_NAME, "success",
+                               f"{inserted} new, {updated} refreshed")
+        except RuntimeError as exc:
+            db.rollback()
+            if is_lock_contention(exc):
+                # Normal operation, not a failure: the other run is doing the
+                # work. Same treatment as jobs/sheets_ingestion_shared.py.
+                print(f"⏭️  Skipped GroupMe ingestion (lock busy): {exc}")
+                record_job_run(db, INGEST_GROUPME_JOB_NAME, "skipped",
+                               f"Lock busy, will retry next run: {exc}")
+                return 0, 0
+            # Our own literal messages (the credential checks), so safe to log.
+            record_job_run(db, INGEST_GROUPME_JOB_NAME, "error", str(exc))
+            raise
+        except GroupMeError as exc:
+            # Redacted at its raise site in api/groupme.py.
+            db.rollback()
             record_job_run(db, INGEST_GROUPME_JOB_NAME, "error", str(exc))
             raise
         except Exception as exc:
@@ -82,18 +114,14 @@ def run(days: int = RESCAN_DAYS) -> tuple[int, int]:
             # ["response"], ["created_at"] and ["id"] directly. Left uncaught
             # this wrote NO job_meta row at all, so monitoring kept reading the
             # last success while the job died in a Railway traceback nobody
-            # opens. Record the exception TYPE only: str(exc) on an arbitrary
-            # exception could carry a response body or a token, and redaction
-            # belongs in api/groupme.py, not here. The re-raise keeps the full
-            # traceback in the logs.
+            # opens. The rollback drops only the pending partial batch;
+            # committed batches stand. The re-raise keeps the traceback.
+            db.rollback()
             record_job_run(
                 db, INGEST_GROUPME_JOB_NAME, "error",
-                f"unexpected {type(exc).__name__} during GroupMe ingestion "
-                f"(details withheld; see job logs)")
+                unexpected_error_message(exc, "GroupMe ingestion"))
             raise
 
-        record_job_run(db, INGEST_GROUPME_JOB_NAME, "success",
-                       f"{inserted} new, {updated} refreshed")
         print(f"✅ GroupMe: {inserted} new, {updated} refreshed")
         return inserted, updated
     finally:
