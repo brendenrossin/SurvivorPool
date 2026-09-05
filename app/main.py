@@ -33,6 +33,7 @@ from app.dashboard_data import (
     get_summary_data,
     get_started_game_weeks,
     get_completed_week_count,
+    get_week_team_status,
     get_player_data,
     get_meme_stats,
     search_players
@@ -41,6 +42,9 @@ from app.picks_grid import (
     MIN_ROWS,
     aggregate_picks,
     build_picks_grid,
+    eliminated_edge,
+    eliminated_fill,
+    mute_color,
     resolve_current_week,
     select_grid_rows,
 )
@@ -436,6 +440,9 @@ def render_weekly_picks_chart(summary):
     week_counts = {t: n for (w, t), n in counts.items() if w == current_week}
     rows = select_grid_rows(week_counts, season_totals, expanded=expanded)
 
+    # Cached: the grid's two controls make every toggle a full script rerun.
+    team_status = get_week_team_status(SEASON, current_week)
+
     fig = build_picks_grid(
         weeks=weeks,
         rows=rows,
@@ -446,109 +453,45 @@ def render_weekly_picks_chart(summary):
         as_percent=as_percent,
         background=APP_SURFACE,
         team_names=get_team_name_map(),
+        team_status=team_status,
     )
 
     # Deliberately not render_mobile_chart: CHART_CONFIGS would overwrite the
     # grid's computed height and its axis config with the bar-chart defaults.
     st.plotly_chart(fig, use_container_width=True, config=get_mobile_config())
 
-    # Add current week picks table, on the same week the grid leads with
-    try:
-        # Find current week's data in summary
-        current_week_data = None
-        for week_data in summary["weeks"]:
-            if week_data["week"] == current_week:
-                current_week_data = week_data
-                break
+    # This replaces the "Week N Picks Breakdown" table. The table listed team
+    # and count, which the grid already shows in the same order; its only
+    # unique content was a ✅/💀/🕐 glyph per team, now carried by the cell
+    # itself. The grid gained an encoding, so it has to name the three it has.
+    swatch = (
+        'display:inline-block;width:11px;height:11px;'
+        'border-radius:2px;vertical-align:-1px;'
+    )
+    sample = get_team_color_map().get(rows[0], "#666666")
+    out_fill = eliminated_fill(sample, APP_SURFACE)
+    st.caption(
+        f'<span style="background:{sample};{swatch}"></span> this week'
+        ' &nbsp;·&nbsp; '
+        f'<span style="background:{mute_color(sample, APP_SURFACE)};{swatch}"></span>'
+        ' earlier weeks'
+        ' &nbsp;·&nbsp; '
+        f'<span style="background:{out_fill};border:2px solid '
+        f'{eliminated_edge(out_fill)};{swatch}"></span> eliminated this week',
+        unsafe_allow_html=True,
+    )
 
-        st.subheader(f"📋 Week {current_week} Picks Breakdown")
+    eliminated = sorted(
+        team for team in rows
+        if team_status.get(team) == "lost" and (current_week, team) in counts
+    )
+    if eliminated:
+        out = sum(counts[(current_week, team)] for team in eliminated)
+        st.caption(
+            f"Week {current_week}: {out} {'entry' if out == 1 else 'entries'} "
+            f"out on {', '.join(eliminated)}"
+        )
 
-        if current_week_data and current_week_data["teams"]:
-            # Get team game status for styling
-            try:
-                from api.database import SessionLocal
-                from api.models import Game
-                losing_teams = set()  # Teams that lost, tied, or caused eliminations (💀)
-                winning_teams = set()  # Teams that won their games (✅)
-                pending_teams = set()  # Teams with games not started yet (🕐)
-
-                # Find all teams with games in current week
-                db = SessionLocal()
-                try:
-                    week_games = db.query(Game).filter(
-                        Game.week == current_week,
-                        Game.season == SEASON
-                    ).all()
-                finally:
-                    try:
-                        db.close()
-                    except Exception:
-                        pass
-
-                for game in week_games:
-                    if game.status == 'final' and game.home_score is not None and game.away_score is not None:
-                        # CRITICAL: Handle ties - both teams are considered "losing" for survivor purposes
-                        if game.home_score == game.away_score:
-                            # TIE GAME - both teams cause eliminations!
-                            losing_teams.add(game.home_team)
-                            losing_teams.add(game.away_team)
-                        elif game.home_score > game.away_score:
-                            # Home team won
-                            winning_teams.add(game.home_team)
-                            losing_teams.add(game.away_team)
-                        else:
-                            # Away team won
-                            winning_teams.add(game.away_team)
-                            losing_teams.add(game.home_team)
-                    elif game.status in ['pre', 'scheduled']:
-                        # Games not started yet
-                        pending_teams.add(game.home_team)
-                        pending_teams.add(game.away_team)
-
-                # NOTE: We only use game results, not database eliminations
-                # This ensures emojis reflect current game status, not stale elimination data
-
-            except Exception as e:
-                logging.exception("Week %s game status lookup failed", current_week)
-                st.warning(f"⚠️ Game results unavailable: {e}")
-                losing_teams = set()
-                winning_teams = set()
-                pending_teams = set()
-
-            # Create DataFrame for the table with emoji indicators
-            table_data = []
-            for team_item in current_week_data["teams"]:
-                team = team_item["team"]
-
-                # Determine emoji based on game status
-                if team in losing_teams:
-                    team_display = f"💀 {team}"  # Lost, tied, or eliminated
-                elif team in winning_teams:
-                    team_display = f"✅ {team}"  # Won their game
-                elif team in pending_teams:
-                    team_display = f"🕐 {team}"  # Game not started
-                else:
-                    team_display = team  # Default (no game data)
-
-                table_data.append({
-                    "Team Picked": team_display,
-                    "Number of Survivors": team_item["count"]
-                })
-
-            # Sort by count descending
-            table_data = sorted(table_data, key=lambda x: x["Number of Survivors"], reverse=True)
-
-            # Display table (no background styling, just emojis)
-            df_table = pd.DataFrame(table_data)
-            st.dataframe(df_table, use_container_width=True, hide_index=True)
-        else:
-            st.info("📝 No picks uploaded to Google Sheet Tracker yet")
-
-    except Exception as e:
-        # Reserve the "nothing uploaded" message for the genuine empty case
-        # handled above; a real failure gets logged and named.
-        logging.exception("Picks breakdown table failed to render")
-        st.warning(f"⚠️ Couldn't build the picks breakdown: {e}")
 
 def render_player_search():
     """Render player search section"""
