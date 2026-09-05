@@ -13,6 +13,14 @@ from sqlalchemy.orm import Session
 # Lock IDs for different job types
 LOCK_INGESTION_AND_SCORING = 1001  # Shared lock for both ingestion and score updates
 
+# Shared by the GroupMe poller and the GroupMe backfill, which write the same
+# chat_messages rows: a Railway retry overlapping the run it retried, or a
+# manual backfill overlapping the poller's cron, would otherwise miss each
+# other's uncommitted rows and collide on the message_id primary key mid-batch.
+# Deliberately NOT 1001 - GroupMe touches none of picks/pick_results, and
+# sharing that lock would make chat ingestion block score updates for nothing.
+LOCK_GROUPME_INGESTION = 1002
+
 
 @contextmanager
 def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
