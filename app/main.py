@@ -280,7 +280,13 @@ def render_weekly_picks_chart(summary):
         summary["weeks"], current_week
     )
     if not counts:
-        st.info("No picks data to display")
+        # Reachable when the sheet holds only future weeks: aggregate_picks
+        # clips at the current week, so picks exist but none are publishable.
+        st.info(
+            f"**No picks for week {current_week} or earlier.** The sheet is "
+            "filled in ahead of kickoff, so picks appear here once their "
+            "games start."
+        )
         return
 
     st.markdown("### 📊 Team Picks by Week")

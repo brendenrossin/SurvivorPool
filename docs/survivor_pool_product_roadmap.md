@@ -202,13 +202,19 @@ that is live in production today, not the SaaS build-out.
       `st.dataframe(height=fig.layout.height)` so it matches the grid. Must
       clamp to the current week: revealing *who* picked an unplayed week is a
       worse leak than the count.
-- [ ] **UI overhaul of the remaining widgets** — `graveyard.py`,
-      `team_of_doom.py`, `survivors.py` share the 30-colour problem, and none of
-      the widget modules cache their database reads (`survivors.py` is an N+1).
-      See `docs/optimizations/picks-grid-backlog.md`.
-- [ ] **Live scores should roll forward on Tuesday.** Once Monday's games are
-      final, the widget should show the *next* week's games. Carried over from
-      the 2025-09-18 working notes; never implemented.
+- [x] **UI overhaul of the remaining widgets** — done in #30. `graveyard.py`,
+      `team_of_doom.py`, `survivors.py` and `chaos_meter.py` are pure view code
+      now; every read goes through a cached function in `dashboard_data.py`.
+      The survivors N+1 went from `2N + 2` round trips to one and the
+      elimination tracker from 42 to one. The donut and the gauge are gone.
+- [x] **Live scores roll forward once a week finishes.** Shipped in #29, but
+      *not* in the shape this line described: the roll is driven by whether
+      every game in the week is final, not by the weekday. The rule it replaced
+      added a week every Tuesday after 04:00 UTC whether or not anything had
+      been played, on top of a base week of `max(Game.week)` — week 16 in 2025,
+      a week nobody played, because the NFL schedule outruns the pool. See
+      `resolve_scoreboard_week` and `should_reveal_picks` in
+      `app/live_scores.py`.
       **Correction:** those notes said "only if a team from that game has been
       picked", and as written that leaks. Filtering an unplayed week's slate to
       picked teams publishes the field's next-week picks days before kickoff —
@@ -218,10 +224,17 @@ that is live in production today, not the SaaS build-out.
       snaps to picked-teams-only with counts once it starts. The grid's
       `resolve_current_week` stays pointed at the last week that kicked off and
       is deliberately *not* unified with the scoreboard's notion of current.
-- [ ] **Every empty state needs its own message.** Each plot, card and table
-      should explain *why* it has nothing to show rather than rendering blank or
-      a generic line. Carried over from the same notes; partially done (the
-      picks grid and breakdown table have theirs, most widgets do not).
+- [x] **Every empty state has its own message.** Each plot, card and table now
+      names the precondition it is waiting on rather than rendering blank or a
+      generic line. Live scores in #29 (three states: no schedule, no picked
+      team playing, not yet kicked off); the four Pool Insights widgets, both
+      meme panels and the KPI sparkline in #30. The last generic line —
+      "No picks data to display" in `render_weekly_picks_chart` — went with
+      #30. This matters most right now because 2026 is nearly empty, so most of
+      these panels are what production actually shows.
+      Errors are deliberately *not* empty states: a failure logs and says
+      "unavailable right now", so "nothing to show yet" and "this broke" do not
+      read the same.
 - [ ] **Work through the picks-grid review backlog** —
       `docs/optimizations/picks-grid-backlog.md`.
 
