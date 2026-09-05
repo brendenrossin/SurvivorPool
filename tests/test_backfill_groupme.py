@@ -9,6 +9,9 @@ rate limit.
 
 from datetime import datetime, timezone
 
+import pytest
+
+from api.groupme import WalkState
 from jobs import backfill_groupme
 
 
@@ -67,3 +70,67 @@ def test_backfill_returns_zero_on_empty_history(job_db, monkeypatch):
     monkeypatch.setattr(backfill_groupme, "iter_messages", lambda *a, **k: iter([]))
     assert backfill_groupme.backfill(
         since=datetime(2025, 9, 1, tzinfo=timezone.utc)) == 0
+
+
+def test_truncated_backfill_does_not_claim_success(job_db, monkeypatch, capsys):
+    """The page ceiling cutting the walk short is not a completed backfill.
+
+    What is missing is the OLDEST end of the range - early-season history, when
+    the group had 252 members rather than 22, which is the highest-value part
+    of the voice corpus.
+    """
+    def walking(group_id, token, max_pages=None, walk=None, **kwargs):
+        yield raw("m1", SEP_2025)
+        walk.stopped_at_ceiling = True      # as iter_messages does at the ceiling
+        walk.pages = max_pages
+
+    monkeypatch.setattr(backfill_groupme, "iter_messages", walking)
+    backfill_groupme.backfill(since=datetime(2025, 9, 1, tzinfo=timezone.utc))
+
+    out = capsys.readouterr().out
+    assert "✅" not in out
+    assert "INCOMPLETE" in out
+    assert "--max-pages" in out
+
+
+def test_complete_backfill_still_reports_success(job_db, monkeypatch, capsys):
+    monkeypatch.setattr(backfill_groupme, "iter_messages",
+                        lambda *a, **k: iter([raw("m1", SEP_2025)]))
+    backfill_groupme.backfill(since=datetime(2025, 9, 1, tzinfo=timezone.utc))
+
+    assert "✅ Backfilled 1 messages" in capsys.readouterr().out
+
+
+def test_backfill_passes_a_walk_state_to_the_client(job_db, monkeypatch):
+    """WalkState is the only way the job can tell truncation from completion,
+    so dropping the argument would silently restore the false success line."""
+    seen = {}
+
+    def capture(group_id, token, **kwargs):
+        seen.update(kwargs)
+        return iter([raw("m1", SEP_2025)])
+
+    monkeypatch.setattr(backfill_groupme, "iter_messages", capture)
+    backfill_groupme.backfill(since=datetime(2025, 9, 1, tzinfo=timezone.utc))
+
+    assert isinstance(seen["walk"], WalkState)
+
+
+def test_since_with_an_offset_is_converted_not_relabelled():
+    """.replace(tzinfo=utc) relabels: a Pacific midnight silently became a UTC
+    midnight, moving the boundary seven hours and dropping real history."""
+    assert backfill_groupme._parse_since("2025-09-01T00:00:00-07:00") == \
+        datetime(2025, 9, 1, 7, 0, tzinfo=timezone.utc)
+
+
+def test_a_naive_since_is_read_as_utc():
+    """The default --since is a bare date, which has no offset to convert."""
+    assert backfill_groupme._parse_since("2025-09-01") == \
+        datetime(2025, 9, 1, tzinfo=timezone.utc)
+
+
+def test_backfill_rejects_a_naive_since(job_db):
+    """Otherwise the naive/aware comparison raises TypeError mid-walk, after
+    batches have already committed."""
+    with pytest.raises(ValueError, match="timezone-aware"):
+        backfill_groupme.backfill(since=datetime(2025, 9, 1))

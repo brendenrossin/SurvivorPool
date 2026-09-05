@@ -72,6 +72,31 @@ def test_run_records_error_and_reraises(job_db, monkeypatch):
     assert meta.last_success_at is None
 
 
+def test_unexpected_error_is_recorded_and_reraised(job_db, monkeypatch):
+    """A GroupMe envelope change raises KeyError, not GroupMeError.
+
+    The client and chat_store index ["response"], ["created_at"] and ["id"]
+    directly, so a schema change used to escape the handler entirely and write
+    NO job_meta row - leaving a stale `success` for monitoring to read while
+    the job died in a Railway traceback nobody opens.
+    """
+    def boom(*a, **k):
+        raise KeyError("super-secret-token-value")
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", boom)
+    with pytest.raises(KeyError):
+        ingest_groupme.run()
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "error"
+    assert meta.last_success_at is None
+    assert "KeyError" in meta.message
+    # The type name, never the payload: str(exc) on an arbitrary exception
+    # could carry a token or a raw response body into job_meta and the logs.
+    assert "super-secret-token-value" not in meta.message
+
+
 def test_missing_credentials_is_a_clear_error(job_db, monkeypatch):
     monkeypatch.delenv("GROUPME_ACCESS_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="GROUPME_ACCESS_TOKEN"):

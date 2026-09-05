@@ -6,6 +6,12 @@ bot's voice corpus is ranked by them, so a high-water-mark poller would freeze
 every count at its value seconds after posting.
 
 Read-only against GroupMe. Posting is GRPM-4 and lives elsewhere.
+
+Outage remedy: the window is trailing, not cumulative, so this job cannot
+self-heal a gap. If it stops running for longer than RESCAN_DAYS, every
+message older than the window on the next successful run is simply never
+ingested. Repair that with jobs/backfill_groupme.py --since <the date the
+outage began>; re-running this poller will not recover it.
 """
 
 import os
@@ -65,7 +71,24 @@ def run(days: int = RESCAN_DAYS) -> tuple[int, int]:
 
             inserted, updated = upsert_messages(db, batch)
         except (GroupMeError, RuntimeError) as exc:
+            # Both are ours and already safe: GroupMeError is redacted at its
+            # raise site in api/groupme.py, RuntimeError is our own literal.
             record_job_run(db, INGEST_GROUPME_JOB_NAME, "error", str(exc))
+            raise
+        except Exception as exc:
+            # Anything else - most realistically a KeyError from a changed
+            # GroupMe envelope, since the client and chat_store index
+            # ["response"], ["created_at"] and ["id"] directly. Left uncaught
+            # this wrote NO job_meta row at all, so monitoring kept reading the
+            # last success while the job died in a Railway traceback nobody
+            # opens. Record the exception TYPE only: str(exc) on an arbitrary
+            # exception could carry a response body or a token, and redaction
+            # belongs in api/groupme.py, not here. The re-raise keeps the full
+            # traceback in the logs.
+            record_job_run(
+                db, INGEST_GROUPME_JOB_NAME, "error",
+                f"unexpected {type(exc).__name__} during GroupMe ingestion "
+                f"(details withheld; see job logs)")
             raise
 
         record_job_run(db, INGEST_GROUPME_JOB_NAME, "success",
