@@ -15,13 +15,18 @@ class APIRateLimiter:
     Thread-safe rate limiter with caching for ESPN API protection
     """
 
-    def __init__(self, max_requests_per_minute: int = 10, cache_duration_seconds: int = 300):
+    def __init__(self, max_requests_per_minute: int = 10, cache_duration_seconds: int = 300,
+                 label: str = "ESPN API"):
         """
         Initialize rate limiter
 
         Args:
             max_requests_per_minute: Maximum requests allowed per minute (conservative default)
             cache_duration_seconds: How long to cache API responses (5 minutes default)
+            label: which API this limiter fronts, used in the startup banner.
+                Defaults to ESPN so existing callers print exactly as before;
+                other callers (GroupMe) pass their own so the banner does not
+                misattribute the limit.
         """
         self.max_requests_per_minute = max_requests_per_minute
         self.cache_duration = timedelta(seconds=cache_duration_seconds)
@@ -31,7 +36,7 @@ class APIRateLimiter:
         self._request_times = []
         self._cache = {}
 
-        print(f"🛡️  ESPN API Rate Limiter: {max_requests_per_minute} req/min, {cache_duration_seconds}s cache")
+        print(f"🛡️  {label} Rate Limiter: {max_requests_per_minute} req/min, {cache_duration_seconds}s cache")
 
     def wait_if_needed(self) -> bool:
         """

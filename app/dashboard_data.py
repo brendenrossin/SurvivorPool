@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, or_, select, text
 
 from api.database import SessionLocal
 from api.models import Player, Pick, PickResult, Game, JobMeta
+from api.pick_tally import resolve_pick_week, tally_unconfirmed
 
 @st.cache_resource
 def get_db_session():
@@ -819,6 +820,44 @@ def get_week_scoreboard(season: int, week: int) -> Scoreboard:
                 split["eliminated"] += count
 
         return {"games": games, "pick_counts": counts, "results": results}
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@st.cache_data(ttl=60)
+def get_unconfirmed_tally(season: int) -> Dict[str, Any]:
+    """This week's picks pulled from the GroupMe, beside the confirmed count.
+
+    Returns plain data - no ORM rows - so the whole payload is cacheable and
+    the view layer never touches a session.
+
+    `unconfirmed` undershoots on purpose: only unambiguous declarations parse,
+    which came to 84.9% of the sheet across 2025. `confirmed` is the
+    authoritative number from `picks`; the two are shown side by side rather
+    than reconciled.
+    """
+    SessionFactory = get_db_session()
+    db = SessionFactory()
+    try:
+        week = resolve_pick_week(db, season)
+        if week is None:
+            return {"week": None, "unconfirmed": 0, "confirmed": 0, "teams": []}
+
+        tally = tally_unconfirmed(db, season, week)
+        confirmed = db.query(func.count(Pick.pick_id)).filter(
+            Pick.season == season, Pick.week == week).scalar() or 0
+
+        return {
+            "week": week,
+            "unconfirmed": sum(tally.values()),
+            "confirmed": confirmed,
+            # Descending by count, then alphabetical, so equal counts do not
+            # reorder themselves between reruns.
+            "teams": sorted(tally.items(), key=lambda kv: (-kv[1], kv[0])),
+        }
     finally:
         try:
             db.close()

@@ -21,8 +21,18 @@ from jobs.sheets_ingestion_shared import (
 )
 
 
-def main():
+def main(argv=None):
     """Main ingestion process using service account"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Ingest picks from Google Sheets")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Re-ingest even if the sheet is unchanged since the last run. "
+             "The hourly schedule relies on the fingerprint skip; this is the "
+             "escape hatch for forcing a refresh by hand.")
+    args = parser.parse_args(argv)
+
     print("📊 Service Account Google Sheets Ingestion")
     print("=" * 50)
 
@@ -45,7 +55,8 @@ def main():
         return True  # Don't fail deployment
 
     # Ingest into database
-    success = ingest_players_and_picks(players_data, source_label="google_sheets")
+    success = ingest_players_and_picks(players_data, source_label="google_sheets",
+                                       force=args.force)
 
     if success:
         print("\n🎉 Service account ingestion successful!")

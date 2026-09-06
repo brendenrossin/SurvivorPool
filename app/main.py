@@ -61,6 +61,7 @@ from app.team_of_doom import render_team_of_doom_widget
 from app.graveyard import render_graveyard_widget
 from app.survivors import render_survivors_widget
 from app.chaos_meter import render_chaos_meter_widget
+from app.unconfirmed_picks import render_unconfirmed_picks_widget
 from app.mobile_plotly_config import get_mobile_config, lock_zoom
 
 # Load environment
@@ -216,6 +217,12 @@ def main():
     render_weekly_picks_chart(summary)
 
     st.divider()
+
+    # After the two things people come for, ahead of what they scroll to. Draws
+    # nothing when the GroupMe has produced no picks for the week, so it owns
+    # its own trailing divider rather than leaving one stacked on the grid's.
+    if render_unconfirmed_picks_widget(SEASON):
+        st.divider()
 
     # The donut's half-width column is gone, so search gets the full width.
     render_player_search()
