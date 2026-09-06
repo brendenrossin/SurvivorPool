@@ -23,6 +23,7 @@ Spec: [`docs/design/groupme-recap-spec.md`](design/groupme-recap-spec.md)
 | GRPM-2 | `WeekFeatures` extraction + backtest harness (no LLM) | 1d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-3 | Recap generation + model/prompt bake-off across five anchor weeks | 2d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-4 | Recap feed widget on the dashboard (`app/recap_feed.py`), two modes | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
+| GRPM-6 | Unconfirmed pick tally parsed from GroupMe chat | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
 
 **GRPM-1 is code-complete but not verified against the live API.** Tasks 2-6 are
 built, reviewed and merged-ready (347 tests). Task 1 — the credential step and the

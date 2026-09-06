@@ -244,6 +244,77 @@ hole across three messages before the dunk lands.
 Hand the model exchanges - who set it up, who landed it, how many likes it got - not
 orphaned one-liners. Ranking still selects on likes; the window supplies the meaning.
 
+## The unconfirmed pick tally
+
+The owner's idea: parse picks straight out of the GroupMe so the dashboard can show a
+running count days before the manager batches them into the sheet on Thursdays -
+*"could be part of the same section and could be a small public 'jab' at Travis that
+he's behind on it but in a very lightly joking way."*
+
+**This was measured, not assumed.** The 2025 sheet is ground truth for what was
+eventually recorded, so a parser can be scored against it. Parsing the live GroupMe
+for week 1 of 2025 and comparing to the 252 picks the sheet holds:
+
+| | |
+|---|---|
+| people with a parseable declaration | 144 |
+| matched a sheet player and **agreed** | 117 |
+| matched a sheet player and disagreed | 2 |
+| **precision** (where names matched) | **98.3%** |
+| **coverage** of the 252 sheet picks | **46.4%** |
+
+**The failure mode is undercounting, which is the safe direction.** A tally that says
+"117 in so far" when 130 have really been posted is honest about being partial; one
+that misattributes a pick is not. That asymmetry is why this is shippable at 46%
+coverage.
+
+Both disagreements were an artifact of the measurement, not the parser: the cutoff
+used was the week's *first* kickoff, but an entrant may change their pick until **the
+team they picked** plays. One of the two posted "Switching to Cardinals" on the Sunday,
+which the sheet correctly recorded and the cutoff wrongly excluded. **The cutoff is
+per-picked-team, not per-week** - which the `games` table already supports.
+
+### Known coverage gaps, in rough order of value
+
+- **Roster posts.** One message can carry several people's picks
+  (`Blake: Broncos Andrew: Philly Brandt: Philly Aris: Commanders`). Currently parsed
+  as nothing. This is a real pattern in the data, not an edge case.
+- **Name aliasing.** 25 parsed declarations came from display names with no match in
+  the sheet. GroupMe display names and sheet names diverge, and the join is fuzzy.
+- **Nickname coverage.** The first pass handles abbreviations, cities, nicknames and
+  common slang (`jags`, `niners`, `bolts`, `fins`, `brownies`, `pats`). The owner's own
+  example - *"I don't wanna do it but I'm taking the brownies"* - parses; longer
+  sentences wrapped around a team name mostly do not.
+- **Lead-in variants.** `switching to the Jags`, `switch to Eagles`, `hanging to
+  packers` were all missed by the first regex pass.
+
+Because ground truth exists for every 2025 week, each of these can be hill-climbed
+with a measured before/after rather than argued about.
+
+### How it is shown
+
+Labelled **unconfirmed**, always, and visibly derived from chat rather than the sheet.
+The confirmed count from `picks` stays the authoritative number; this sits beside it
+as the faster, messier one.
+
+**The jab only fires when it is true.** If the unconfirmed count exceeds the confirmed
+count, the copy can note that the sheet is catching up. If the manager is current, there
+is no joke to make and none is made - a bit that fires on a false premise is worse than
+no bit.
+
+## Where the feed goes on the page
+
+The owner: *"below the scoreboard and the weekly count heat map type chart ... those
+two are the most informative or visually appealing things that people prob look at so
+we don't want to interfere with those but above the other charts."*
+
+Current order in `app/main.py`: live scores (`render_live_scores_widget`, ~:180) ->
+picks grid (`render_weekly_picks_chart`, ~:216) -> player search (~:221) -> meme stats
+(~:224) -> footer.
+
+**The feed is inserted after the picks grid's divider and before `render_player_search`.**
+It follows the two things people come for and precedes everything they scroll to.
+
 ### The bot performs Travis's function in the group's register
 
 The owner, after reading the real corpus: *"it should be sort of performing the
