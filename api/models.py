@@ -7,7 +7,7 @@ from api.database import Base
 class Player(Base):
     __tablename__ = "players"
 
-    player_id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, primary_key=True)
     display_name = Column(String, unique=True, nullable=False)
 
     picks = relationship("Pick", back_populates="player")
@@ -15,7 +15,7 @@ class Player(Base):
 class Pick(Base):
     __tablename__ = "picks"
 
-    pick_id = Column(Integer, primary_key=True, index=True)
+    pick_id = Column(Integer, primary_key=True)
     player_id = Column(Integer, ForeignKey("players.player_id"))
     season = Column(Integer, nullable=False)
     week = Column(Integer, nullable=False)
@@ -25,6 +25,18 @@ class Pick(Base):
 
     player = relationship("Player", back_populates="picks")
     result = relationship("PickResult", back_populates="pick", uselist=False)
+
+    __table_args__ = (
+        # The no-reusing-a-team rule, enforced by the database rather than by
+        # ingestion remembering to check. Partial because a blank cell in the
+        # sheet is a real state - a player who has not picked yet - and several
+        # of those per player must not collide.
+        Index("uniq_player_team_season", "player_id", "season", "team_abbr",
+              unique=True,
+              postgresql_where=sql_text("team_abbr IS NOT NULL"),
+              sqlite_where=sql_text("team_abbr IS NOT NULL")),
+        Index("idx_picks_season_week", "season", "week"),
+    )
 
 class Game(Base):
     __tablename__ = "games"
@@ -45,6 +57,13 @@ class Game(Base):
 
     pick_results = relationship("PickResult", back_populates="game")
 
+    __table_args__ = (
+        Index("idx_games_season_week", "season", "week"),
+        Index("idx_games_status", "status"),
+        Index("idx_games_point_spread", "point_spread"),
+        Index("idx_games_favorite_team", "favorite_team"),
+    )
+
 class PickResult(Base):
     __tablename__ = "pick_results"
 
@@ -56,6 +75,10 @@ class PickResult(Base):
 
     pick = relationship("Pick", back_populates="result")
     game = relationship("Game", back_populates="pick_results")
+
+    __table_args__ = (
+        Index("idx_pick_results_survived", "survived"),
+    )
 
 class JobMeta(Base):
     __tablename__ = "job_meta"

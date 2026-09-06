@@ -29,7 +29,13 @@ CREATE TABLE IF NOT EXISTS games (
     status TEXT NOT NULL,       -- 'pre','in','final'
     home_score INT,
     away_score INT,
-    winner_abbr TEXT            -- null until final
+    winner_abbr TEXT,           -- null until final
+    -- Odds, added later. These lived only in init_db_railway.py's ALTER
+    -- statements, so a fresh database built from this file alone was missing
+    -- them while api/models.py declared them. Declared here so this file is
+    -- the whole schema; the ALTERs remain for databases created before it.
+    point_spread REAL,
+    favorite_team VARCHAR(50)
 );
 
 -- results of picks evaluated against final winners
@@ -60,6 +66,8 @@ CREATE INDEX IF NOT EXISTS idx_picks_season_week ON picks(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_season_week ON games(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_pick_results_survived ON pick_results(survived);
+CREATE INDEX IF NOT EXISTS idx_games_point_spread ON games(point_spread);
+CREATE INDEX IF NOT EXISTS idx_games_favorite_team ON games(favorite_team);
 
 -- GroupMe chat history, source of the recap bot's voice corpus
 CREATE TABLE IF NOT EXISTS chat_messages (
