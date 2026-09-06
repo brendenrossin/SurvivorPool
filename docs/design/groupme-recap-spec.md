@@ -251,7 +251,34 @@ running count days before the manager batches them into the sheet on Thursdays -
 *"could be part of the same section and could be a small public 'jab' at Travis that
 he's behind on it but in a very lightly joking way."*
 
-**No identity mapping is needed, and that is what makes this work.** The owner:
+### Two different things, only one of which we need
+
+**Sender-to-entrant mapping: not needed.** The owner: *"we just need to have unique
+senders, Travis takes care of mapping sheet player to who is sending so technically we
+don't care about who is sending what."* The tally is a count per team. That deletes the
+fuzzy GroupMe-name-to-sheet-name join and every failure it would have introduced.
+
+**Sender uniqueness: required.** *"We still need to verify uniqueness of sender and map
+that to the pick in case someone sends another team they're switching to."* Keying on
+GroupMe's `user_id` with last-declaration-wins is what stops a switch being counted as
+two picks.
+
+Measured on week 1 of 2025: 5 of 186 senders (2.7%) changed team, and without dedup the
+tally would report **191 picks instead of 186**. The *distribution* barely moves at that
+rate (0.97 vs 0.98 points of mean share error), but the **count** is the number the
+widget leads with and the one the "the sheet is behind" comparison rests on, so it has
+to be right. Late-season switching is likely heavier, when entrants are down to a
+handful of unused teams.
+
+Last-declaration-wins was correct on every switch the sheet can verify: CIN→PIT, WAS→DEN
+and WAS→JAX all match what was eventually recorded.
+
+**Roster posts are the exception to sender-keying.** A message carrying several people's
+picks (`Blake: Broncos Andrew: Philly ...`) contributes several picks from one sender, so
+those cannot collapse to one. The key is the entrant as the message expresses them - the
+sender by default, the named person in a roster post.
+
+**It was measured against ground truth, not assumed.** The owner:
 *"we just need to have unique senders, Travis takes care of mapping sheet player to who
 is sending so technically we don't care about who is sending what."* The tally is a
 **count per team**, not an attribution. That deletes the fuzzy GroupMe-name-to-sheet-name
@@ -297,9 +324,7 @@ correctly recorded. The cutoff is per-picked-team, which the `games` table suppo
 
 - **Roster posts.** One message can carry several people's picks
   (`Blake: Broncos Andrew: Philly Brandt: Philly Aris: Commanders`). Currently parsed as
-  nothing. Note this breaks the one-pick-per-sender model deliberately: such a message
-  contributes several picks from a single sender, so the unit being counted is a
-  **declaration**, not a sender.
+  nothing - and see the sender-keying exception above, since these must not collapse.
 - **Nickname breadth.** Abbreviations, cities, nicknames and common slang (`jags`,
   `niners`, `bolts`, `fins`, `brownies`, `pats`) parse today. The owner's own example -
   *"I don't wanna do it but I'm taking the brownies"* - does not, because the team name
