@@ -60,3 +60,27 @@ CREATE INDEX IF NOT EXISTS idx_picks_season_week ON picks(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_season_week ON games(season, week);
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_pick_results_survived ON pick_results(survived);
+
+-- GroupMe chat history, source of the recap bot's voice corpus
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    sender_id TEXT,
+    sender_name TEXT,
+    sender_type TEXT,
+    text TEXT,
+    favorite_count INT NOT NULL DEFAULT 0,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+-- Corpus reads are one shape: most-liked human messages before a cutoff.
+-- A partial index over the fixed predicates serves the filter AND the sort from
+-- a single scan; the two single-column indexes this replaced served neither
+-- fully, and sender_type != 'bot' is an inequality a plain btree cannot seek on.
+-- Must stay identical to ChatMessage.__table_args__ in api/models.py.
+DROP INDEX IF EXISTS idx_chat_messages_created_at;
+DROP INDEX IF EXISTS idx_chat_messages_favorites;
+CREATE INDEX IF NOT EXISTS idx_chat_messages_corpus
+    ON chat_messages (favorite_count DESC, created_at)
+    WHERE is_system = false AND sender_type != 'bot';

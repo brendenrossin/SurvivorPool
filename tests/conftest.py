@@ -31,6 +31,19 @@ def db():
 
 
 @pytest.fixture
+def job_db(db, monkeypatch):
+    """A session the jobs will not close, with GroupMe credentials stubbed."""
+    from jobs import backfill_groupme, ingest_groupme
+
+    monkeypatch.setattr(db, "close", lambda: None)
+    monkeypatch.setattr(ingest_groupme, "SessionLocal", lambda: db)
+    monkeypatch.setattr(backfill_groupme, "SessionLocal", lambda: db)
+    monkeypatch.setenv("GROUPME_ACCESS_TOKEN", "tok")
+    monkeypatch.setenv("GROUPME_READ_GROUP_ID", "g1")
+    return db
+
+
+@pytest.fixture
 def seeded_db(db):
     """Two seasons of history: a 2025-only player and a two-season player."""
     alumni = Player(display_name="Alumni Only 2025")
@@ -46,3 +59,42 @@ def seeded_db(db):
     ])
     db.commit()
     return db
+
+
+class _FakePostgresSession:
+    """A session that looks like Postgres to api/job_locks.advisory_lock().
+
+    Advisory locks do not exist on SQLite - advisory_lock() skips the whole
+    mechanism there - so reaching its real raise site needs a stand-in that
+    reports the postgresql dialect and answers pg_try_advisory_lock. No network
+    and no database: only enough surface for that one function.
+    """
+
+    class _Dialect:
+        name = "postgresql"
+
+    class _Bind:
+        dialect = None
+
+    class _Result:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    def __init__(self, acquired: bool = False):
+        self.bind = self._Bind()
+        self.bind.dialect = self._Dialect()
+        self._acquired = acquired
+        self.statements: list[str] = []
+
+    def execute(self, statement, params=None):
+        self.statements.append(str(statement))
+        return self._Result(self._acquired)
+
+
+@pytest.fixture
+def postgres_session():
+    """Factory: postgres_session(acquired=False) -> a busy-lock session."""
+    return _FakePostgresSession
