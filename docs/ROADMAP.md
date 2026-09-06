@@ -24,8 +24,9 @@ Spec: [`docs/design/groupme-recap-spec.md`](design/groupme-recap-spec.md)
 | GRPM-3 | Recap generation + model/prompt bake-off across five anchor weeks | 2d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-4 | Recap feed widget on the dashboard (`app/recap_feed.py`), two modes | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
 | GRPM-6 | Unconfirmed pick tally parsed from GroupMe chat | 1.5d | **PR** | [spec](design/groupme-recap-spec.md) |
-| GRPM-7 | Poll Sheets hourly and re-ingest on change, instead of waiting for the daily cron | 0.5d | **Backlog** | — |
+| GRPM-7 | Poll Sheets hourly and re-ingest on change, instead of waiting for the daily cron | 0.5d | **PR** | — |
 | GRPM-8 | Roster posts: one message carrying several entrants' picks | 0.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
+| GRPM-9 | Provision the GroupMe cron on **production** and backfill `chat_messages` there | 0.5d | **Backlog** | — |
 
 **GRPM-1 is complete and verified against the live API.** 407 tests pass. Every
 definition-of-done item below is met:

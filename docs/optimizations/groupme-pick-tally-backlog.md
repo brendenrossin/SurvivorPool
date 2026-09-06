@@ -25,3 +25,21 @@ Ground truth exists for every week, so each gets a measured before/after.
 | long / roster-ish (>60 chars) | 41 | overlaps the row below |
 | roster posts (`Blake: Broncos Andrew: Philly …`) | 9 | needs a second code path: one message → several picks, keyed on the named person, and must not collapse under sender dedup |
 | trailing emoji / parenthesised / `Paid` | — | **shipped** |
+
+## GRPM-9 — making the tally visible on production
+
+The widget is code-complete but will draw nothing on production until this is
+done. `db/migrations.sql` runs at every boot with `CREATE TABLE IF NOT EXISTS`,
+so the **table** appears on the next deploy; nothing populates it.
+
+1. Create a `Groupme-Cron-Prod` service in the Railway **production**
+   environment, pointed at `jobs/ingest_groupme.py`.
+2. Set `GROUPME_ACCESS_TOKEN` and `GROUPME_READ_GROUP_ID` on it (values are in
+   `.env`; group `24708586`).
+3. Run the season backfill once against the production database
+   (`ballast.proxy.rlwy.net`), not staging (`mainline`):
+   `DATABASE_URL=<prod> python jobs/backfill_groupme.py --since 2025-09-01`
+   — 2,896 rows on staging, ~30s.
+4. Set the cron schedule in the dashboard (CLI cannot do this).
+
+Until then the card's `hidden` check keeps production clean rather than broken.
