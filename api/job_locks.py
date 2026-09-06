@@ -22,6 +22,31 @@ LOCK_INGESTION_AND_SCORING = 1001  # Shared lock for both ingestion and score up
 LOCK_GROUPME_INGESTION = 1002
 
 
+class LockContentionError(RuntimeError):
+    """Another job holds the lock. Normal operation, not a failure.
+
+    Subclasses RuntimeError deliberately: jobs/sheets_ingestion_shared.py and
+    jobs/update_scores.py both catch RuntimeError and then match "advisory
+    lock" in the message, so raising this instead of a bare RuntimeError
+    changes nothing for them while giving new callers something to match on
+    that a reworded message cannot silently break.
+
+    New code should use is_lock_contention() rather than either the type or the
+    string.
+    """
+
+
+def is_lock_contention(exc: BaseException) -> bool:
+    """Whether `exc` is advisory_lock() reporting a lock somebody else holds.
+
+    Matching on the type, not on the message. The message match this replaced
+    was a copy of a string with nothing enforcing the copy - renaming the text
+    at the raise site left every test green and turned a routine skip into a
+    recorded error.
+    """
+    return isinstance(exc, LockContentionError)
+
+
 @contextmanager
 def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
     """
@@ -36,7 +61,9 @@ def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
         timeout_seconds: Max time to wait for lock (default 5 minutes)
 
     Raises:
-        RuntimeError: If lock cannot be acquired within timeout
+        LockContentionError: If another session already holds the lock. It is a
+            RuntimeError, so pre-existing ``except RuntimeError`` handlers are
+            unaffected.
     """
     # Check if we're using SQLite (which doesn't support advisory locks)
     engine_name = db.bind.dialect.name
@@ -57,7 +84,11 @@ def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
         ).scalar()
 
         if not result:
-            raise RuntimeError(
+            # The words "advisory lock" are load-bearing until
+            # jobs/sheets_ingestion_shared.py and jobs/update_scores.py stop
+            # matching on them; tests/test_job_locks.py pins that substring
+            # against the real raise so rewording it here fails loudly.
+            raise LockContentionError(
                 f"Could not acquire advisory lock {lock_id} - another job is running. "
                 f"Will retry on next cron schedule."
             )
