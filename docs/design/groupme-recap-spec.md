@@ -286,8 +286,20 @@ join entirely, and with it the whole class of failures that join would have intr
 
 **It was measured against ground truth, not assumed.** The 2025 sheet records what was
 eventually entered, so parsing that season's chat and comparing distributions gives a
-real score. Week 1 of 2025, counting the last declaration per sender up to the end of
-the week's games:
+real score.
+
+> **Superseded, and how.** The week-1 table below was the only week ever scored, and
+> scoring only week 1 hid a load-bearing bug: the prototype's tally had no lower bound,
+> so "last declaration per sender" ran across the whole season and every prior week's
+> pick stayed live. Week 1 is the one week where that is invisible, because nothing
+> precedes it. Scored across all fourteen weeks the prototype reports 3282 picks against
+> a sheet of 1379 - 238% - and by week 14 it claims 239 picks where the sheet has 19.
+> The shipped implementation adds a per-week window; see "What shipped" below for the
+> numbers that replace these. The week-1 figures themselves are accurate and are kept
+> because the shipped parser is still measured against them.
+
+Week 1 of 2025, counting the last declaration per sender up to the end of the week's
+games:
 
 | | |
 |---|---|
@@ -320,6 +332,42 @@ above, and an entrant may switch until **the team they picked** plays - one appa
 error was someone posting "Switching to Cardinals" on the Sunday, which the sheet
 correctly recorded. The cutoff is per-picked-team, which the `games` table supports.
 
+### What shipped
+
+`api/pick_parser.py` (pure text -> team) and `api/pick_tally.py` (window, dedup,
+per-team cutoff), scored by `scripts/score_pick_parser.py` against every 2025 week.
+
+| | prototype (week 1 only) | prototype, all weeks | **shipped** |
+|---|---|---|---|
+| season capture | - | 238.0% (3282/1379) | **84.9%** (1171/1379) |
+| week 1 capture | 74.2% | 74.2% | **75.4%** |
+| week 1 share error | 0.98pt | 0.98pt | **0.92pt** |
+| mean share error | - | 4.36pt | **1.79pt** |
+| top-5 agreement | 5/5 | 33/70 | **59/70** |
+
+Three rules bound the count, and it is wrong without any of them:
+
+1. **A per-week window.** Start is the previous week's last kickoff; week 1 uses a
+   21-day lookback, because an unbounded start pulls *last season's* declarations into
+   this season's opening tally - the group is reused year to year.
+2. **Sender uniqueness**, keyed on `user_id`, last declaration wins.
+3. **A per-team cutoff.** A declaration counts only if it was made before *that team's*
+   kickoff, not the week's last. The prototype used the week's last, which lets
+   "switching to DEN" land after Denver has already played.
+
+Parser additions, each measured: the `Paid` prefix (`Paid - Jags`, 29 messages in 2025
+and still in use), trailing-emoji stripping, parenthesised forms, and refusing tokens
+that name two teams (`los angeles` is both LAR and LAC; the prototype let dict insertion
+order decide).
+
+**Validated live.** On 2026 week 1 the tally parsed 75 picks against 81 confirmed -
+92.6% capture, top five exactly right.
+
+**Weeks with no declarations are real.** 2025 week 14 scores 0%: 24 messages in the
+window, one parseable, and it was posted three hours after Cleveland kicked off. By
+December the pool is down to 21 entrants who have stopped announcing picks in the group.
+The widget draws nothing rather than an empty card.
+
 ### Known coverage gaps, in rough order of value
 
 - **Roster posts.** One message can carry several people's picks
@@ -336,16 +384,31 @@ Ground truth exists for **every** 2025 week, so each of these gets a measured
 before/after rather than an argument. That makes this the one part of the recap work
 that can be hill-climbed properly - the rest can only be judged by reading it.
 
+**The ordering above was itself derived from week 1 and does not survive measurement.**
+Counted across the season, the 327 unparsed messages that contain a team token break
+down as: conversational (`Lions pls`, `LAC for me`, `Bills mafia`) 226, long/roster-ish
+41, **`Paid` prefix 29**, trailing emoji 15, roster posts **9**. Roster posts were ranked
+first and are the smallest cluster; the `Paid` prefix was not listed at all and shipped.
+
+The conversational cluster is the largest and is deliberately **not** being chased.
+`boys` is a Dallas token, so any loosening that catches "Lions pls" also turns "good luck
+boys" and "it was fun boys" into Dallas picks. Undercounting is the safe direction.
+
 ### How it is shown
 
-Labelled **unconfirmed**, always, and visibly derived from chat rather than the sheet.
-The confirmed count from `picks` stays the authoritative number; this sits beside it
-as the faster, messier one.
+Labelled as **pulled from GroupMe**, always, and visibly derived from chat. The
+confirmed count from `picks` stays the authoritative number; this sits beside it as the
+faster, messier one.
 
-**The jab only fires when it is true.** If the unconfirmed count exceeds the confirmed
-count, the copy can note that the sheet is catching up. If the manager is current, there
-is no joke to make and none is made - a bit that fires on a false premise is worse than
-no bit.
+**The copy never says "the sheet."** The owner's rule: most people reading the dashboard
+do not know what the sheet is. The widget says "pulled from GroupMe" and "confirmed",
+and a test asserts the word never reaches the rendered markup in any state.
+
+**The jab only fires when it is true.** When the GroupMe count exceeds the confirmed
+count, the caption reads *"N picks pulled from GroupMe while we wait for Trav to
+officially update picks."* When the manager is current - as he was on 2026 week 1, 81
+confirmed against 75 parsed - there is no joke to make and none is made. A bit that
+fires on a false premise is worse than no bit.
 
 ## Where the feed goes on the page
 
