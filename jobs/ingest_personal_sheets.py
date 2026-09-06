@@ -62,7 +62,10 @@ def main():
 
     if not oauth_data:
         print("⚠️ No data retrieved from Google Sheets (check OAuth credentials)")
-        return True  # Don't fail deployment, just skip ingestion
+        # See jobs/ingest_sheet.py: honest exit code, caller still continues.
+        # This is the path that runs on every web boot, and an expired refresh
+        # token lands exactly here.
+        return False
 
     # Convert OAuth format to raw format
     raw_data = convert_oauth_format_to_raw(oauth_data)
@@ -72,7 +75,7 @@ def main():
 
     if not players_data:
         print("⚠️ No valid picks data parsed")
-        return True  # Don't fail deployment
+        return False
 
     # Ingest into database
     success = ingest_players_and_picks(players_data, source_label="google_sheets_personal")

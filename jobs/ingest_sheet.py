@@ -45,14 +45,20 @@ def main(argv=None):
 
     if not raw_data:
         print("⚠️ No data retrieved from Google Sheets (check service account)")
-        return True  # Don't fail deployment, just skip ingestion
+        # Reports failure, and deliberately does not stop the caller. start.sh
+        # continues past a non-zero exit on its own, so "the boot must not be
+        # blocked" and "the exit code must be honest" are separable - and while
+        # they were conflated, start.sh printed a tick straight after this line
+        # and a scheduled cron would record a green run for a sheet it never
+        # read.
+        return False
 
     # Use GOLD STANDARD shared logic for everything else
     players_data = parse_picks_data(raw_data)
 
     if not players_data:
         print("⚠️ No valid picks data parsed")
-        return True  # Don't fail deployment
+        return False
 
     # Ingest into database
     success = ingest_players_and_picks(players_data, source_label="google_sheets",

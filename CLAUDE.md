@@ -181,10 +181,36 @@ PORT=8530 && streamlit run app/main.py --server.port=$PORT --server.address=0.0.
 - Fallback providers available (SportRadar, etc.)
 
 ### Cron Job Schedule
+
+**Do not trust a schedule written down here — check it.** The block below used to
+assert "Sheet Ingestion: 07:00 PT daily + 09:30 PT Sundays". On 2026-09-06 that was
+found to be false and to have been false for a long time: **no service in any
+environment had a cron schedule at all.** Railway's own API reported `cronSchedule:
+null` for every service in production, staging and Dev.
+
+What had actually been refreshing the data is `start.sh`, which runs on the **web
+service** at every container boot and calls `jobs/ingest_personal_sheets.py` plus a
+full score update. Railway restarts that container on deploys and infra events often
+enough that it *looked* like a daily cron. That is a fallback, not a schedule: it
+cannot be relied on, and picks went 22 hours stale on production because of it.
+
+The `cron/*.py` wrappers and the `Sheets-Cron` / `Scores-Cron` / `Odds-Cron` services
+are real and correctly configured. They simply run once at deploy unless a schedule is
+attached in the dashboard.
+
+**Schedules are dashboard-only and invisible to `railway` CLI.** To read the truth,
+query the API with the CLI's own token:
+
+```python
+# token: ~/.railway/config.json -> user.token ; needs a non-default User-Agent
+# POST https://backboard.railway.com/graphql/v2
+# query($id:String!){ project(id:$id){ services{ edges{ node{ name
+#   serviceInstances{ edges{ node{ environmentId cronSchedule } } } } } } } }
 ```
-Sheet Ingestion: 07:00 PT daily + 09:30 PT Sundays
-Score Updates: Hourly Sun 10-21 PT + Mon/Thu 21 PT
-```
+
+Once schedules exist, `jobs/ingest_sheet.py` skips when the sheet is unchanged
+(GRPM-7), so an hourly Sheets schedule costs one API call and a hash compare on the
+23 uneventful runs.
 
 ## 🐛 Common Issues & Solutions
 

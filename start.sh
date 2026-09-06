@@ -14,7 +14,7 @@ python scripts/railway_migration.py
 if [ $? -eq 0 ]; then
     echo "✅ Odds migration completed successfully"
 else
-    echo "⚠️ Odds migration failed, continuing anyway"
+    echo "BOOT-WARNING: odds column migration failed; odds features may be degraded"
 fi
 
 # Default port if not set
@@ -23,76 +23,23 @@ if [ -z "$PORT" ]; then
     echo "⚠️  PORT not set, using default: $PORT"
 fi
 
-echo "🎯 Starting Streamlit on port $PORT"
-
-# Check if database needs initial data population
-echo "📊 Checking if database needs initial data..."
-python -c "
-from api.database import SessionLocal
-from api.models import Player, Pick
-try:
-    db = SessionLocal()
-    player_count = db.query(Player).count()
-    pick_count = db.query(Pick).count()
-    db.close()
-
-    print(f'📊 Current database state: {player_count} players, {pick_count} picks')
-
-    if player_count < 20 or pick_count < 50:
-        print('🆕 Database needs comprehensive data, will populate...')
-        exit(1)
-    else:
-        print(f'✅ Database has sufficient data ({player_count} players, {pick_count} picks)')
-        exit(0)
-except Exception as e:
-    print(f'⚠️ Database check failed: {e}, will try to populate anyway...')
-    exit(1)
-"
-
-if [ $? -eq 1 ]; then
-    echo "🔄 Populating database with mock data..."
-    python railway_populate_mock.py
-    if [ $? -eq 0 ]; then
-        echo "✅ Mock data created successfully"
-    else
-        echo "⚠️ Mock data creation failed, continuing anyway"
-    fi
-
-    echo "🏈 Fetching NFL games..."
-    python jobs/update_scores.py
-    if [ $? -eq 0 ]; then
-        echo "✅ NFL scores updated successfully"
-    else
-        echo "⚠️ NFL scores update failed, continuing anyway"
-    fi
-
-    echo "🔄 Running full score update to populate all weeks..."
-    python jobs/update_scores.py
-    if [ $? -eq 0 ]; then
-        echo "✅ Full score update completed (includes all weeks + auto-eliminations)"
-    else
-        echo "⚠️ Score update failed, continuing anyway"
-    fi
-
-    echo "🔄 Backfilling historical data if needed..."
-    python backfill_historical.py
-    if [ $? -eq 0 ]; then
-        echo "✅ Historical data backfilled successfully"
-    else
-        echo "⚠️ Historical backfill failed, continuing anyway"
-    fi
-
-    echo "📱 Mock data population complete"
-fi
+# NOTE: a mock-data population branch used to sit here. It called
+# railway_populate_mock.py and backfill_historical.py from the repo root, but
+# both moved into scripts/ on 2025-09-30 and this file was never updated, so it
+# had failed silently ever since behind "continuing anyway". Its trigger was
+# `player_count < 20 or pick_count < 50`, which is TRUE for a fresh or a
+# newly-rolled-over season - so had the paths ever been corrected it would have
+# seeded randomised players and picks into a live pool. It also ran
+# jobs/update_scores.py twice, on top of the run further down. Deleted rather
+# than repaired: nothing should be able to invent entrants on boot.
 
 # Try to ingest real data from Google Sheets if OAuth is configured
 echo "📊 Attempting real data ingestion from Google Sheets..."
 python jobs/ingest_personal_sheets.py
 if [ $? -eq 0 ]; then
     echo "✅ Real data ingested successfully from Google Sheets"
-    echo "🧹 Real data replaces any mock data that was created"
 else
-    echo "⚠️ Real data ingestion failed, using mock data (if available)"
+    echo "BOOT-WARNING: sheet ingestion failed on startup; serving whatever is already in the database"
 fi
 
 # Always ensure game winners are set with improved logic
@@ -114,7 +61,8 @@ updater.run(fetch_odds=False)
 print('✅ Full score update completed on startup')
 "
 
-echo "🚀 All data processing complete, starting Streamlit..."
+echo "🚀 All data processing complete"
+echo "🎯 Starting Streamlit on port $PORT"
 
 exec streamlit run app/main.py \
     --server.port=$PORT \
