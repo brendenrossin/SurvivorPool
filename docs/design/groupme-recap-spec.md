@@ -251,45 +251,65 @@ running count days before the manager batches them into the sheet on Thursdays -
 *"could be part of the same section and could be a small public 'jab' at Travis that
 he's behind on it but in a very lightly joking way."*
 
-**This was measured, not assumed.** The 2025 sheet is ground truth for what was
-eventually recorded, so a parser can be scored against it. Parsing the live GroupMe
-for week 1 of 2025 and comparing to the 252 picks the sheet holds:
+**No identity mapping is needed, and that is what makes this work.** The owner:
+*"we just need to have unique senders, Travis takes care of mapping sheet player to who
+is sending so technically we don't care about who is sending what."* The tally is a
+**count per team**, not an attribution. That deletes the fuzzy GroupMe-name-to-sheet-name
+join entirely, and with it the whole class of failures that join would have introduced.
+
+**It was measured against ground truth, not assumed.** The 2025 sheet records what was
+eventually entered, so parsing that season's chat and comparing distributions gives a
+real score. Week 1 of 2025, counting the last declaration per sender up to the end of
+the week's games:
 
 | | |
 |---|---|
-| people with a parseable declaration | 144 |
-| matched a sheet player and **agreed** | 117 |
-| matched a sheet player and disagreed | 2 |
-| **precision** (where names matched) | **98.3%** |
-| **coverage** of the 252 sheet picks | **46.4%** |
+| unique senders with a parsed pick | 187 |
+| picks recorded in the sheet | 252 |
+| **capture rate** | **74.2%** |
+| **mean absolute share error** | **0.98 pts** |
+| **top-5 teams, chat vs sheet** | **5 of 5** |
 
-**The failure mode is undercounting, which is the safe direction.** A tally that says
-"117 in so far" when 130 have really been posted is honest about being partial; one
-that misattributes a pick is not. That asymmetry is why this is shippable at 46%
-coverage.
+| Team | chat | sheet | chat % | sheet % |
+|---|---:|---:|---:|---:|
+| DEN | 64 | 93 | 34.2% | 36.9% |
+| ARI | 47 | 53 | 25.1% | 21.0% |
+| PHI | 22 | 35 | 11.8% | 13.9% |
+| CIN | 15 | 24 | 8.0% | 9.5% |
+| WAS | 19 | 22 | 10.2% | 8.7% |
 
-Both disagreements were an artifact of the measurement, not the parser: the cutoff
-used was the week's *first* kickoff, but an entrant may change their pick until **the
-team they picked** plays. One of the two posted "Switching to Cardinals" on the Sunday,
-which the sheet correctly recorded and the cutoff wrongly excluded. **The cutoff is
-per-picked-team, not per-week** - which the `games` table already supports.
+**The shape of the field survives a quarter of the picks going missing.** Mean share
+error is under a point and the top five teams are the right five. That is the question
+this widget answers - *is everyone piling onto Denver again?* - not *what did a
+particular entrant pick*, which the sheet answers later and authoritatively.
+
+**The failure mode is undercounting**, which is the safe direction. A tally that says
+"187 in so far" while admitting it is partial is honest; one that misattributes is not.
+That asymmetry is why this ships at 74% rather than waiting for 95%.
+
+An earlier measurement scored 46.4% by requiring a sheet-name match and cutting off at
+the week's *first* kickoff. Both were wrong: the name match is unnecessary per the
+above, and an entrant may switch until **the team they picked** plays - one apparent
+error was someone posting "Switching to Cardinals" on the Sunday, which the sheet
+correctly recorded. The cutoff is per-picked-team, which the `games` table supports.
 
 ### Known coverage gaps, in rough order of value
 
 - **Roster posts.** One message can carry several people's picks
-  (`Blake: Broncos Andrew: Philly Brandt: Philly Aris: Commanders`). Currently parsed
-  as nothing. This is a real pattern in the data, not an edge case.
-- **Name aliasing.** 25 parsed declarations came from display names with no match in
-  the sheet. GroupMe display names and sheet names diverge, and the join is fuzzy.
-- **Nickname coverage.** The first pass handles abbreviations, cities, nicknames and
-  common slang (`jags`, `niners`, `bolts`, `fins`, `brownies`, `pats`). The owner's own
-  example - *"I don't wanna do it but I'm taking the brownies"* - parses; longer
-  sentences wrapped around a team name mostly do not.
-- **Lead-in variants.** `switching to the Jags`, `switch to Eagles`, `hanging to
-  packers` were all missed by the first regex pass.
+  (`Blake: Broncos Andrew: Philly Brandt: Philly Aris: Commanders`). Currently parsed as
+  nothing. Note this breaks the one-pick-per-sender model deliberately: such a message
+  contributes several picks from a single sender, so the unit being counted is a
+  **declaration**, not a sender.
+- **Nickname breadth.** Abbreviations, cities, nicknames and common slang (`jags`,
+  `niners`, `bolts`, `fins`, `brownies`, `pats`) parse today. The owner's own example -
+  *"I don't wanna do it but I'm taking the brownies"* - does not, because the team name
+  is wrapped in a sentence rather than standing alone.
+- **Lead-in variants.** `switching to the Jags`, `switch to Eagles`, `hanging to packers`
+  were missed by the first pass and are cheap to add.
 
-Because ground truth exists for every 2025 week, each of these can be hill-climbed
-with a measured before/after rather than argued about.
+Ground truth exists for **every** 2025 week, so each of these gets a measured
+before/after rather than an argument. That makes this the one part of the recap work
+that can be hill-climbed properly - the rest can only be judged by reading it.
 
 ### How it is shown
 
