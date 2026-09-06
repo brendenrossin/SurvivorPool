@@ -160,6 +160,90 @@ the first sentence a lot, the rest is ehh."* So the instruction is not "be conci
 "land one angle and stop" - explicitly no stat recitation after the opening, and no
 closing line that draws a lesson from what was just said.
 
+## The recap is a feed on the dashboard, not a post in the GroupMe
+
+**Changed 2026-09-05, at the owner's direction**, after the corpus work made the
+tradeoff concrete: *"instead of injecting it into the groupme it's on the actual site
+itself ... best of both worlds where it can read groupme and be aware but not be
+intrusive into it and everything is self contained on the site."*
+
+The system still **reads** GroupMe. It no longer **writes** there.
+
+Why this is better on the merits, not merely less intrusive:
+
+- **Generating stops being publishing.** A GroupMe post reaches 284 people and cannot
+  be unsent. On the dashboard a recap can be read, regenerated, edited or deleted
+  before anyone sees it. For a feature whose entire risk is "does this sound AI
+  generated", turning an irreversible action into a reversible one is worth more than
+  any amount of prompt tuning.
+- **The whole system stays read-only.** No posting credential, no bot creation, no
+  two-bots-because-a-bot_id-binds-to-its-group ceremony, no "can staging reach the
+  real chat" question. That entire safety architecture existed only to make posting
+  safe, and it is now unnecessary rather than merely satisfied.
+- **`weekly_recaps` is better justified** - it stops being a post log and becomes the
+  table the widget reads.
+
+The cost considered and dismissed: a feed only gets read if people visit. The owner's
+answer is that they do - *"People do already use the site (or will once I send it out,
+people liked it last year)"* - and the dashboard was already the destination the pool
+uses. If the recaps turn out good, piping them into GroupMe later is one function on a
+client that already exists, decided with evidence rather than hope.
+
+**There is no disclosure concern here, and this spec should stop raising one.** Picks
+are public in the GroupMe from the moment they are posted (`docs/pool-process.md`),
+and a recap covers a week that has already finished. This was mistakenly treated as a
+leak twice during design; CLAUDE.md warns about exactly that mistake.
+
+### Two modes, because the week has two halves
+
+The owner's shape: *"a weekly recap from the previous weeks stats and GroupMe
+interactions and then once games start maybe it changes a little to where it's more
+about the current games/scores but still with context from the GroupMe recent
+chats."*
+
+| Mode | When | Built from |
+|---|---|---|
+| **Recap** | after every game of the week is final | that week's `WeekFeatures` + the week's GroupMe conversation |
+| **Live** | once the next week has kicked off | current scores and picked teams + the most recent GroupMe conversation |
+
+The app already distinguishes these states - `resolve_scoreboard_week` and
+`should_reveal_picks` in `app/live_scores.py` decide whether a week has kicked off or
+finished, and the feed reads that rather than inventing a second notion of "current".
+
+## Building the corpus: what the live data actually showed
+
+2,145 human messages from the 2025 season were pulled and analysed. Three findings
+changed the design.
+
+**Over half the chat is pick declarations.** 1,155 of 2,145 messages - **53.8%** - are
+nothing but a team name, peaking Tue/Wed/Thu (195/233/263) with a Sunday spike of
+last-minute switches. Ingest them (they are cheap, and they are how the week is
+timed), but they must be excluded from anything shown to the model, or the context
+window fills with `Broncos / Cardinals / Eagles`.
+
+*The filter is not finished.* A first pass on team abbreviations, full names and
+nicknames plus lead-ins like "switching to" leaves `switching to **the** Jags`,
+`switch to Eagles`, `hanging to packers`, and multi-person roster posts
+(`Blake: Broncos Andrew: Philly`) uncaught. Tuning it is GRPM-3's work; the 53.8%
+figure is the floor, not the ceiling.
+
+**GroupMe's reply feature is useless here.** Only **2.1%** of messages (44 of 2,145)
+are explicit replies, and just 3 of the top 40 by likes. Reply metadata cannot
+reconstruct what a jab was aimed at, so **temporal adjacency is the conversational
+structure**.
+
+**A context window recovers the joke, and top-liked messages alone do not.** The
+owner: *"the 'ope' one with no context doesn't really help give context at all."*
+Correct - and demonstrably fixable. The season's most-liked message ("bro really put
+the inner monologue in the chat") is meaningless alone; with the three preceding
+*conversation* messages it is a complete bit, showing a member talking himself into a
+hole across three messages before the dunk lands.
+
+**So the corpus is built from exchanges, not lines.** Take the top-liked messages as
+**anchors**, and for each attach the preceding few non-pick messages as its window.
+Hand the model exchanges - who set it up, who landed it, how many likes it got - not
+orphaned one-liners. Ranking still selects on likes; the window supplies the meaning.
+
 ### The bot performs Travis's function in the group's register
 
 The owner, after reading the real corpus: *"it should be sort of performing the

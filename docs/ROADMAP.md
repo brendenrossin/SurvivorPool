@@ -22,8 +22,7 @@ Spec: [`docs/design/groupme-recap-spec.md`](design/groupme-recap-spec.md)
 | GRPM-1 | GroupMe read client, `chat_messages` table, poller + season backfill | 2d | **Review** | [spec](design/groupme-recap-spec.md) |
 | GRPM-2 | `WeekFeatures` extraction + backtest harness (no LLM) | 1d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-3 | Recap generation + model/prompt bake-off across five anchor weeks | 2d | **Pending** | [spec](design/groupme-recap-spec.md) |
-| GRPM-4 | Post to the staging test group, dry-run off, soak | 1d | **Blocked** | [spec](design/groupme-recap-spec.md) |
-| GRPM-5 | Production bot | 0.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
+| GRPM-4 | Recap feed widget on the dashboard (`app/recap_feed.py`), two modes | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
 
 **GRPM-1 is code-complete but not verified against the live API.** Tasks 2-6 are
 built, reviewed and merged-ready (347 tests). Task 1 — the credential step and the
@@ -65,11 +64,9 @@ retention probe — is still open, so these definition-of-done items remain unme
 - GRPM-1 and GRPM-2 are independent and can run in parallel. GRPM-2's *harness* needs
   GRPM-1's corpus to be meaningful, but `WeekFeatures` does not.
 - GRPM-3 needs both GRPM-1 and GRPM-2.
-- GRPM-4 needs GRPM-3, **and** is blocked on an out-of-repo prerequisite: the owner
-  creating the test GroupMe group and both bots (real-chat bot and test-group bot).
-  A `bot_id` is bound to its group at creation, which is what makes staging unable to
-  reach the real chat.
-- GRPM-5 needs GRPM-4 to have soaked.
+- GRPM-4 needs GRPM-3. It is **no longer blocked on anything out-of-repo**: the recap
+  renders on the dashboard instead of posting to GroupMe, so no bots need creating and
+  the staging/production posting split is gone. The system is read-only end to end.
 
 **GRPM-1's open risk is CLOSED.** GroupMe retains removed members' messages, so the
 voice corpus is not survivor-only and GRPM-3's few-shot strategy stands as specced.
