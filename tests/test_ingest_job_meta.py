@@ -131,3 +131,34 @@ def test_reporting_failure_never_masks_a_successful_ingestion(persistent_db, mon
 
     assert ingest_players_and_picks({"Ada": {1: "BUF"}}) is True
     assert persistent_db.query(Pick).filter(Pick.season == 2026).count() == 1
+
+
+# --- eliminations must see the picks the same run just ingested -------------
+
+def test_eliminations_run_against_the_picks_just_ingested(persistent_db, monkeypatch):
+    """The flush before process_all_eliminations is load-bearing.
+
+    `SessionLocal` is autoflush=False, so the picks added above it are still
+    pending in the identity map. `process_all_eliminations` opens by querying
+    picks for the season; without the flush it finds none and quietly
+    recomputes eliminations against an empty pick set on every single run.
+    Nothing caught that while the test session autoflushed for it.
+
+    Season is pinned here rather than inherited from NFL_SEASON so this does
+    not depend on the developer's .env.
+    """
+    monkeypatch.setenv("NFL_SEASON", "2026")
+    seen = []
+
+    from jobs.update_scores import ScoreUpdater
+
+    def spy(self, db, current_week=None):
+        seen.append(db.query(Pick).filter(Pick.season == 2026).count())
+        return {"picks_updated": 0, "stuck_games_fixed": 0,
+                "missing_pick_eliminations": 0}
+
+    monkeypatch.setattr(ScoreUpdater, "process_all_eliminations", spy)
+
+    ingest_players_and_picks({"Ada": {1: "BUF", 2: "KC"}})
+
+    assert seen == [2], "eliminations ran before the picks were flushed"

@@ -23,7 +23,12 @@ def db():
         cursor.close()
 
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    # autoflush=False mirrors api/database.py's SessionLocal. Production runs
+    # under those flush semantics, so the tests must too: an autoflushing test
+    # session silently supplies a flush that production would not, which once
+    # let a load-bearing db.flush() be deleted from api/chat_store.py with the
+    # whole suite still green.
+    session = sessionmaker(bind=engine, autoflush=False)()
     try:
         yield session
     finally:

@@ -65,41 +65,24 @@ def test_created_at_is_converted_from_unix_seconds(db):
 
 
 def test_duplicate_ids_within_one_batch_do_not_double_insert(db):
-    """Trailing-window re-scans overlap, so a batch can contain repeats."""
+    """Trailing-window re-scans overlap, so a batch can contain repeats.
+
+    The in-batch dedupe is what makes this work, and it is load-bearing in
+    production. Under autoflush=True a lookup query would flush the pending
+    add, so a repeated id inside one batch gets found whether or not the store
+    handles it - which masked the problem entirely until the `db` fixture was
+    changed to match api/database.py's autoflush=False SessionLocal. With no
+    such safety net, a batch that added the same id twice raises on the primary
+    key at commit. The poller re-scans an overlapping window, so a batch
+    containing the same id twice is normal input, not an edge case.
+
+    This once needed its own hand-built autoflush=False session to express;
+    the shared fixture now supplies production semantics, so it does not.
+    """
     inserted, updated = upsert_messages(db, [raw("m1", favs=1), raw("m1", favs=4)])
     db.commit()
     assert inserted == 1
     assert db.query(ChatMessage).one().favorite_count == 4
-
-
-def test_duplicate_ids_in_one_batch_under_production_session_semantics(db):
-    """The in-batch dedupe is load-bearing in production.
-
-    tests/conftest.py builds its session with SQLAlchemy's default
-    autoflush=True, which masks the problem: a lookup query auto-flushes any
-    pending add, so a repeated id inside one batch is found whether or not the
-    store handles it. api/database.py builds SessionLocal with autoflush=False,
-    so production has no such safety net - a batch that added the same id twice
-    would raise on the primary key at commit. The poller re-scans an overlapping
-    window, so a batch containing the same id twice is normal input, not an edge
-    case.
-
-    This test pins the production configuration so losing the dedupe fails here
-    instead of in production.
-    """
-    from sqlalchemy.orm import sessionmaker
-
-    Session = sessionmaker(bind=db.get_bind(), autoflush=False)
-    session = Session()
-    try:
-        inserted, updated = upsert_messages(
-            session, [raw("m1", favs=1), raw("m1", favs=4)])
-        session.commit()
-
-        assert inserted == 1
-        assert session.query(ChatMessage).one().favorite_count == 4
-    finally:
-        session.close()
 
 
 def test_the_store_does_not_own_the_transaction(db):

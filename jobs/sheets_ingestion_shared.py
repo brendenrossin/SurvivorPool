@@ -219,6 +219,12 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
                         db.add(new_pick)
                         picks_created += 1
 
+            # Load-bearing. SessionLocal is autoflush=False, so the picks added
+            # above are still pending in the identity map; process_all_eliminations
+            # starts by querying picks for the season and would find none, quietly
+            # recomputing eliminations against an empty pick set on every run.
+            db.flush()
+
             # Re-calculate ALL elimination results using shared helper
             # This ensures consistency with app startup and cron jobs
             print("🔄 Re-calculating elimination results from current game data...")
