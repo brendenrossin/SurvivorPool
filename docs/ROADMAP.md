@@ -23,15 +23,21 @@ Spec: [`docs/design/groupme-recap-spec.md`](design/groupme-recap-spec.md)
 | GRPM-2 | `WeekFeatures` extraction + backtest harness (no LLM) | 1d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-3 | Recap generation + model/prompt bake-off across five anchor weeks | 2d | **Pending** | [spec](design/groupme-recap-spec.md) |
 | GRPM-4 | Recap feed widget on the dashboard (`app/recap_feed.py`), two modes | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
-| GRPM-6 | Unconfirmed pick tally parsed from GroupMe chat | 1.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
+| GRPM-6 | Unconfirmed pick tally parsed from GroupMe chat | 1.5d | **PR** | [spec](design/groupme-recap-spec.md) |
+| GRPM-7 | Poll Sheets hourly and re-ingest on change, instead of waiting for the daily cron | 0.5d | **Backlog** | — |
+| GRPM-8 | Roster posts: one message carrying several entrants' picks | 0.5d | **Backlog** | [spec](design/groupme-recap-spec.md) |
 
 **GRPM-1 is complete and verified against the live API.** 407 tests pass. Every
 definition-of-done item below is met:
 
 - [x] Retention probe answered **RETAINED** — 160 messages from 5 ex-members still visible
-- [ ] `chat_messages` populated from a real backfill, row count recorded
-- [ ] `job_meta` carries an `ingest_groupme` success row
-- [ ] A removal system message spot-checked with `is_system = true`
+- [x] `chat_messages` populated from a real backfill — **2,896 rows** on staging
+      (2,429 user / 467 system, 270 distinct senders, 2025-09-01 to 2026-09-06),
+      no page-ceiling warning. A full season is small enough to scan without paging.
+- [ ] `job_meta` carries an `ingest_groupme` success row — **still open.** The
+      backfill has run (`backfill_groupme`, success); the *poller* has not.
+- [x] A removal system message spot-checked with `is_system = true` — e.g.
+      "Aditya Sinha removed Matt Fairchild from the group." 
 - [x] **Header auth confirmed** — `X-Access-Token` returns HTTP 200 against the
       live API. Query-param auth also works, so the fallback is real.
 - [x] Envelope confirmed: `created_at` unix seconds, `system` bool, `sender_type`
