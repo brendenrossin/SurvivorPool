@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from api import job_locks
 from api.models import ChatMessage
 from jobs import groupme_shared
 
@@ -75,7 +76,9 @@ def test_progress_is_reported_with_running_totals(db):
     assert seen == [(2, 0), (4, 0)]
 
 
-def test_counts_separate_new_rows_from_refreshed_ones(db):
+def test_counts_separate_new_rows_from_re_seen_ones(db):
+    """The second number is rows matched, not rows whose content changed -
+    upsert_messages() re-writes every field it touches either way."""
     groupme_shared.store_in_batches(db, iter([raw("m1")]))
     db.commit()
 
@@ -83,17 +86,53 @@ def test_counts_separate_new_rows_from_refreshed_ones(db):
         db, iter([raw("m1"), raw("m2")])) == (1, 1)
 
 
-def test_lock_contention_is_recognised_by_its_message():
-    """api/job_locks.py raises a bare RuntimeError, so there is no exception
-    type to match on - the same string check jobs/sheets_ingestion_shared.py
-    uses. If that message ever changes, a busy lock starts being recorded as an
-    error, which is what this pins."""
-    busy = RuntimeError("Could not acquire advisory lock 1002 - another job is "
-                        "running. Will retry on next cron schedule.")
-    assert groupme_shared.is_lock_contention(busy)
+def test_lock_contention_is_recognised_from_the_real_raise(postgres_session):
+    """Provoked from api/job_locks.py, never hand-written.
+
+    The version this replaces built its own copy of the contention message and
+    asserted the detector matched the copy. It pinned nothing: rewording the
+    real message left the whole suite green while both GroupMe jobs began
+    recording a routine busy lock as an error. Reach the actual raise site
+    instead - tests/test_job_locks.py covers the rest of that contract.
+    """
+    busy = postgres_session(acquired=False)
+    with pytest.raises(job_locks.LockContentionError) as caught:
+        with job_locks.advisory_lock(busy, job_locks.LOCK_GROUPME_INGESTION):
+            pytest.fail("the body must not run when the lock is busy")
+
+    assert groupme_shared.is_lock_contention(caught.value)
     assert not groupme_shared.is_lock_contention(
-        RuntimeError("GROUPME_ACCESS_TOKEN is not set"))
-    assert not groupme_shared.is_lock_contention(KeyError("advisory lock"))
+        groupme_shared.ConfigurationError("GROUPME_ACCESS_TOKEN is not set"))
+    # A lookalike message is not contention; only the type is.
+    assert not groupme_shared.is_lock_contention(RuntimeError("advisory lock"))
+
+
+def test_missing_credentials_names_the_variable_and_never_its_value(monkeypatch):
+    """This message is the one exception text the jobs persist verbatim."""
+    monkeypatch.setenv("GROUPME_ACCESS_TOKEN", "super-secret-token-value")
+    monkeypatch.setenv("GROUPME_READ_GROUP_ID", "g1")
+    assert groupme_shared.require_credentials() == ("super-secret-token-value", "g1")
+
+    monkeypatch.delenv("GROUPME_ACCESS_TOKEN")
+    with pytest.raises(groupme_shared.ConfigurationError) as caught:
+        groupme_shared.require_credentials()
+
+    assert "GROUPME_ACCESS_TOKEN" in str(caught.value)
+    assert "super-secret-token-value" not in str(caught.value)
+
+
+def test_report_swallows_a_job_meta_failure_rather_than_masking_the_real_one(
+        db, monkeypatch, capsys):
+    """Every caller is inside an exception handler. A record_job_run() that
+    itself raises there would replace the real exception and record nothing -
+    the reason jobs/sheets_ingestion_shared.py wraps it the same way."""
+    def boom(*a, **k):
+        raise RuntimeError("job_meta table missing")
+
+    monkeypatch.setattr(groupme_shared, "record_job_run", boom)
+    groupme_shared.report(db, "ingest_groupme", "error", "something failed")
+
+    assert "Could not record job_meta (error)" in capsys.readouterr().out
 
 
 def test_an_unexpected_error_is_summarised_without_its_payload():

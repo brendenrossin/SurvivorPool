@@ -12,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from api.groupme import WalkState
-from api.job_locks import LOCK_GROUPME_INGESTION, LOCK_INGESTION_AND_SCORING
+from api.job_locks import (LOCK_GROUPME_INGESTION, LOCK_INGESTION_AND_SCORING,
+                           LockContentionError)
 from api.models import ChatMessage, JobMeta
 from jobs import ingest_groupme
 
@@ -100,10 +101,69 @@ def test_unexpected_error_is_recorded_and_reraised(job_db, monkeypatch):
     assert "super-secret-token-value" not in meta.message
 
 
-def test_missing_credentials_is_a_clear_error(job_db, monkeypatch):
-    monkeypatch.delenv("GROUPME_ACCESS_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="GROUPME_ACCESS_TOKEN"):
+def test_missing_credentials_is_recorded_and_reraised(job_db, monkeypatch):
+    """A rotated, revoked or unset token is the likeliest way this job dies.
+
+    The credential check used to run BEFORE the session was opened, so it
+    raised with nowhere to write - no job_meta row at all, and monitoring kept
+    reading the last success while every run failed. Same silent death an
+    unhandled envelope change used to cause, from a likelier cause.
+    """
+    monkeypatch.setenv("GROUPME_ACCESS_TOKEN", "super-secret-token-value")
+    monkeypatch.setattr(ingest_groupme, "iter_messages",
+                        lambda *a, **k: iter([raw("m1")]))
+    ingest_groupme.run()          # a good run first, to set last_success_at
+    before = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one().last_success_at
+    assert before is not None
+
+    monkeypatch.delenv("GROUPME_ACCESS_TOKEN")
+    monkeypatch.setattr(
+        ingest_groupme, "iter_messages",
+        lambda *a, **k: pytest.fail("must not fetch without credentials"))
+    with pytest.raises(ingest_groupme.ConfigurationError,
+                       match="GROUPME_ACCESS_TOKEN"):
         ingest_groupme.run()
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "error"
+    assert "GROUPME_ACCESS_TOKEN" in meta.message
+    # Names the variable, never its value: this is the credential path.
+    assert "super-secret-token-value" not in meta.message
+    assert meta.last_success_at == before   # a failure never rewrites it
+
+
+def test_a_third_party_runtime_error_is_not_logged_verbatim(job_db, monkeypatch):
+    """The `except RuntimeError` branch used to log str(exc), justified by a
+    comment saying the only RuntimeErrors reaching it were our own credential
+    messages. Those are ConfigurationErrors now; what is left is requests and
+    psycopg, which put URLs and connection strings in their messages."""
+    def boom(*a, **k):
+        raise RuntimeError("connection to postgres://user:hunter2@host failed")
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", boom)
+    with pytest.raises(RuntimeError):
+        ingest_groupme.run()
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "error"
+    assert "hunter2" not in meta.message
+    assert "RuntimeError" in meta.message
+    assert meta.last_success_at is None
+
+
+def test_missing_group_id_is_recorded_too(job_db, monkeypatch):
+    monkeypatch.delenv("GROUPME_READ_GROUP_ID")
+    with pytest.raises(ingest_groupme.ConfigurationError,
+                       match="GROUPME_READ_GROUP_ID"):
+        ingest_groupme.run()
+
+    meta = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
+    assert meta.status == "error"
+    assert meta.last_success_at is None
 
 
 def test_run_stops_at_the_trailing_window_edge(job_db, monkeypatch):
@@ -164,25 +224,55 @@ def _ceiling_walk(*messages):
     return walking
 
 
-def test_ceiling_truncation_warns_and_is_not_a_success(job_db, monkeypatch, capsys):
-    """The old detection inferred truncation from `total_seen >= MAX_RESCAN_PAGES
-    * PAGE_LIMIT`, which is a guaranteed false negative whenever any page comes
-    back short of PAGE_LIMIT - which GroupMe does routinely. WalkState is the
-    only reliable signal.
+def test_ceiling_truncation_warns_but_still_advances_last_success(
+        job_db, monkeypatch, capsys):
+    """For the POLLER a page ceiling is a success with a caveat, not the
+    backfill's "incomplete".
+
+    The walk runs newest-first, so hitting the ceiling means every new message
+    WAS captured; what was missed is a favorite-count refresh on the oldest
+    tail of a window whose messages are already stored. MAX_RESCAN_PAGES is
+    5,000 messages over 14 days, which a 252-member chat clears on an NFL
+    Sunday - so recording this as incomplete stopped last_success_at
+    advancing permanently on a job that was working correctly.
+
+    (Detection itself is WalkState, not the old `total_seen >= MAX_RESCAN_PAGES
+    * PAGE_LIMIT` heuristic, which was a guaranteed false negative whenever a
+    page came back short of PAGE_LIMIT - which GroupMe does routinely.)
     """
     monkeypatch.setattr(ingest_groupme, "iter_messages", _ceiling_walk(raw("m1")))
     ingest_groupme.run()
 
     out = capsys.readouterr().out
     assert "ceiling" in out
-    assert "✅" not in out
+    assert "⚠️" in out
 
     meta = job_db.query(JobMeta).filter_by(
         job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
-    assert meta.status != "success"
-    assert meta.last_success_at is None
-    # The window was not covered, but what it did fetch is still stored.
+    assert meta.status == "success"
+    assert meta.last_success_at is not None
+    # The caveat has to be legible to whoever reads the row, not just a status.
+    assert "ceiling" in meta.message
+    assert "favorite counts may be stale" in meta.message
     assert job_db.query(ChatMessage).count() == 1
+
+
+def test_a_repeatedly_ceilinged_poller_keeps_advancing_last_success(
+        job_db, monkeypatch):
+    """The regression this guards: every run hitting the ceiling used to leave
+    last_success_at frozen at whenever the chat was last quiet enough."""
+    monkeypatch.setattr(ingest_groupme, "iter_messages", _ceiling_walk(raw("m1")))
+    ingest_groupme.run()
+    first = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one().last_success_at
+
+    monkeypatch.setattr(ingest_groupme, "iter_messages", _ceiling_walk(raw("m2")))
+    ingest_groupme.run()
+    second = job_db.query(JobMeta).filter_by(
+        job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one().last_success_at
+
+    assert first is not None and second is not None
+    assert second >= first
 
 
 def test_no_ceiling_warning_when_history_simply_ran_out(job_db, monkeypatch, capsys):
@@ -197,7 +287,7 @@ def test_no_ceiling_warning_when_history_simply_ran_out(job_db, monkeypatch, cap
 
     out = capsys.readouterr().out
     assert "ceiling" not in out
-    assert "✅ GroupMe: 1 new, 0 refreshed" in out
+    assert "✅ GroupMe: 1 new, 0 re-seen" in out
 
     meta = job_db.query(JobMeta).filter_by(
         job_name=ingest_groupme.INGEST_GROUPME_JOB_NAME).one()
@@ -257,7 +347,10 @@ def test_a_busy_lock_is_skipped_not_an_error(job_db, monkeypatch):
     masks a real failure from monitoring."""
     @contextmanager
     def busy(db, lock_id, **kwargs):
-        raise RuntimeError(
+        # The real type api/job_locks.py raises. A hand-written RuntimeError
+        # carrying a copy of its message would pass whatever the message
+        # actually says, which is the coupling this suite used to fake.
+        raise LockContentionError(
             f"Could not acquire advisory lock {lock_id} - another job is running.")
         yield   # pragma: no cover
 

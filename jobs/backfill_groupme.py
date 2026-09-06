@@ -4,16 +4,16 @@ Run once per season, not on a cron. The poller in ingest_groupme.py keeps
 things current afterwards.
 """
 
-import os
 from datetime import datetime, timezone
+from typing import Optional
 
 from api.database import SessionLocal
 from api.groupme import GroupMeError, WalkState, iter_messages
 from api.job_locks import LOCK_GROUPME_INGESTION, advisory_lock
 from jobs.groupme_shared import (BATCH_SIZE, STATUS_INCOMPLETE,
-                                 is_lock_contention, messages_until,
+                                 ConfigurationError, is_lock_contention,
+                                 messages_until, report, require_credentials,
                                  store_in_batches, unexpected_error_message)
-from jobs.sheets_ingestion_shared import record_job_run
 
 BACKFILL_GROUPME_JOB_NAME = "backfill_groupme"
 MAX_PAGES = 500          # 50k messages; a ceiling, not an expectation
@@ -34,40 +34,46 @@ def _parse_since(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def backfill(since: datetime, max_pages: int = MAX_PAGES) -> tuple[int, int]:
+def backfill(since: datetime,
+             max_pages: int = MAX_PAGES) -> Optional[tuple[int, int]]:
     """Store every message posted on or after `since`.
 
-    Returns (inserted, updated), not their sum. On a re-run over overlapping
+    Returns (inserted, matched), not their sum. On a re-run over overlapping
     history the sum is dominated by re-touched rows, so a single number cannot
-    tell an operator progress from re-scan noise.
+    tell an operator progress from re-scan noise. `matched` counts rows the
+    walk saw again, not rows whose content changed - see store_in_batches().
+
+    Returns None when the backfill DID NOT RUN because another GroupMe job
+    holds the lock. (0, 0) means it ran and found nothing; the two are worth
+    telling apart for a job an operator invokes by hand and waits on.
     """
-    if since.tzinfo is None or since.utcoffset() is None:
-        # Comparing naive to aware raises TypeError, and it would raise inside
-        # the walk - after batches had already committed, leaving a partial
-        # backfill behind a traceback. Fail before the first request instead.
-        raise ValueError(
-            "backfill(since=...) requires a timezone-aware datetime")
-
-    token = os.getenv("GROUPME_ACCESS_TOKEN")
-    group_id = os.getenv("GROUPME_READ_GROUP_ID")
-    if not token:
-        raise RuntimeError("GROUPME_ACCESS_TOKEN is not set")
-    if not group_id:
-        raise RuntimeError("GROUPME_READ_GROUP_ID is not set")
-
+    # The session is opened before the argument check and before the
+    # credentials are read. Both used to raise out here with no session open
+    # and no job_meta row - a revoked GROUPME_ACCESS_TOKEN left exactly as
+    # little trace as an unhandled envelope change once did.
     db = SessionLocal()
     try:
         walk = WalkState()
 
-        def progress(inserted, updated):
-            print(f"  ... {inserted} new, {updated} refreshed")
+        def progress(inserted, matched):
+            print(f"  ... {inserted} new, {matched} re-seen")
 
         try:
+            if since.tzinfo is None or since.utcoffset() is None:
+                # Comparing naive to aware raises TypeError, and it would raise
+                # inside the walk - after batches had already committed, leaving
+                # a partial backfill behind a traceback. Fail before the first
+                # request instead.
+                raise ConfigurationError(
+                    "backfill(since=...) requires a timezone-aware datetime")
+
+            token, group_id = require_credentials()
+
             # Same lock as the poller: this walks and writes the very rows the
             # poller's trailing window is re-scanning, and an operator running
             # this by hand has no idea when the cron next fires.
             with advisory_lock(db, LOCK_GROUPME_INGESTION):
-                inserted, updated = store_in_batches(
+                inserted, matched = store_in_batches(
                     db,
                     messages_until(
                         iter_messages(group_id, token, max_pages=max_pages,
@@ -77,42 +83,59 @@ def backfill(since: datetime, max_pages: int = MAX_PAGES) -> tuple[int, int]:
                     on_progress=progress)
 
                 if walk.stopped_at_ceiling:
-                    # Not a success. The walk goes newest-first, so what is
-                    # missing is the OLDEST end of the range - the early-season
-                    # history the corpus most wants, back when the group had 252
-                    # members rather than 22.
+                    # Not a success, and unlike the poller's ceiling this really
+                    # does mean history is missing. The walk goes newest-first,
+                    # so what is absent is the OLDEST end of the range - the
+                    # early-season history the corpus most wants, back when the
+                    # group had 252 members rather than 22.
                     print(f"⚠️ Backfill INCOMPLETE: stopped at the {max_pages}-page "
-                          f"ceiling after {inserted} new / {updated} refreshed, "
+                          f"ceiling after {inserted} new / {matched} re-seen, "
                           f"before reaching {since.date()}. The missing history is "
                           f"the oldest part of the range. Re-run with a larger "
                           f"--max-pages, or with a later --since and then work "
                           f"backward from there.")
-                    record_job_run(
+                    report(
                         db, BACKFILL_GROUPME_JOB_NAME, STATUS_INCOMPLETE,
-                        f"{inserted} new, {updated} refreshed; stopped at the "
+                        f"{inserted} new, {matched} re-seen; stopped at the "
                         f"{max_pages}-page ceiling before reaching {since.date()}")
-                    return inserted, updated
+                    return inserted, matched
 
                 # record_job_run() commits, which is also what commits the
                 # trailing partial batch store_in_batches() left pending.
-                record_job_run(
+                report(
                     db, BACKFILL_GROUPME_JOB_NAME, "success",
-                    f"{inserted} new, {updated} refreshed since {since.date()}")
-        except RuntimeError as exc:
+                    f"{inserted} new, {matched} re-seen since {since.date()}")
+        except ConfigurationError as exc:
+            # The one exception whose text is safe to persist: built in
+            # jobs/groupme_shared.py from literals and an environment variable
+            # NAME, never its value.
             db.rollback()
-            if is_lock_contention(exc):
-                # Normal operation: the poller is mid-run, or another backfill
-                # is. Recorded the way jobs/sheets_ingestion_shared.py does it.
-                print(f"⏭️  Skipped GroupMe backfill (lock busy): {exc}")
-                record_job_run(db, BACKFILL_GROUPME_JOB_NAME, "skipped",
-                               f"Lock busy, will retry next run: {exc}")
-                return 0, 0
-            record_job_run(db, BACKFILL_GROUPME_JOB_NAME, "error", str(exc))
+            report(db, BACKFILL_GROUPME_JOB_NAME, "error", str(exc))
             raise
         except GroupMeError as exc:
             # Already redacted at its raise site in api/groupme.py.
             db.rollback()
-            record_job_run(db, BACKFILL_GROUPME_JOB_NAME, "error", str(exc))
+            report(db, BACKFILL_GROUPME_JOB_NAME, "error", str(exc))
+            raise
+        except RuntimeError as exc:
+            db.rollback()
+            if is_lock_contention(exc):
+                # Normal operation: the poller is mid-run, or another backfill
+                # is. But this is a one-shot an operator started and is waiting
+                # on, so "will retry next run" - true for the poller's cron - is
+                # a lie here. Nothing was backfilled and nothing will be until
+                # somebody runs it again.
+                print(f"⏭️  GroupMe backfill DID NOT RUN (lock busy): {exc}")
+                report(db, BACKFILL_GROUPME_JOB_NAME, "skipped",
+                       "Lock busy: the backfill did not run. Re-run it once "
+                       "the other GroupMe job finishes.")
+                return None
+            # Somebody else's RuntimeError - requests and psycopg raise them
+            # with a URL or a connection string in the message. The comment that
+            # used to justify logging str(exc) here named the credential checks,
+            # which are ConfigurationErrors now.
+            report(db, BACKFILL_GROUPME_JOB_NAME, "error",
+                   unexpected_error_message(exc, "GroupMe backfill"))
             raise
         except Exception as exc:
             # A KeyError from a changed GroupMe envelope is the realistic case.
@@ -122,14 +145,13 @@ def backfill(since: datetime, max_pages: int = MAX_PAGES) -> tuple[int, int]:
             # str(exc) on an arbitrary exception can carry a token or a raw
             # response body into job_meta. The re-raise keeps it loud.
             db.rollback()
-            record_job_run(
-                db, BACKFILL_GROUPME_JOB_NAME, "error",
-                unexpected_error_message(exc, "GroupMe backfill"))
+            report(db, BACKFILL_GROUPME_JOB_NAME, "error",
+                   unexpected_error_message(exc, "GroupMe backfill"))
             raise
 
-        print(f"✅ Backfilled {inserted} new, {updated} refreshed "
+        print(f"✅ Backfilled {inserted} new, {matched} re-seen "
               f"since {since.date()}")
-        return inserted, updated
+        return inserted, matched
     finally:
         try:
             db.close()
@@ -137,7 +159,13 @@ def backfill(since: datetime, max_pages: int = MAX_PAGES) -> tuple[int, int]:
             pass
 
 
-if __name__ == "__main__":
+def main(argv=None) -> int:
+    """Exit code for the one-shot: 0 if the backfill ran, 1 if it did not.
+
+    `python jobs/backfill_groupme.py && echo done` used to print `done` after a
+    run that never happened, because a busy lock returned quietly and __main__
+    threw the return value away.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(description="Backfill GroupMe history")
@@ -146,6 +174,13 @@ if __name__ == "__main__":
                              "start). Naive values are read as UTC; an offset "
                              "is converted, not relabelled.")
     parser.add_argument("--max-pages", type=int, default=MAX_PAGES)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    backfill(since=_parse_since(args.since), max_pages=args.max_pages)
+    result = backfill(since=_parse_since(args.since), max_pages=args.max_pages)
+    return 0 if result is not None else 1
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
