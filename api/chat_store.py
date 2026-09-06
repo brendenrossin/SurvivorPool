@@ -42,7 +42,13 @@ def upsert_messages(db: Session,
     rows with its own job_meta bookkeeping atomically.
 
     Returns:
-        (inserted, updated)
+        (inserted, matched). `matched` counts rows that were already stored and
+        got re-written, NOT rows whose content differed: every field is
+        setattr'd unconditionally, so an identical re-scan of an unchanged
+        window still counts every row it touched. That is honest arithmetic for
+        what this does, and comparing field-by-field to report a truer number
+        would buy a job_meta adjective at the cost of a branch per column - but
+        callers must therefore report it as rows re-seen, never as refreshed.
     """
     # Deduplicate before touching the database, last occurrence winning. The
     # poller re-scans an overlapping window, so a repeated id inside one batch

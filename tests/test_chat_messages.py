@@ -52,14 +52,36 @@ def test_the_corpus_index_matches_the_migration_sql():
     """Tests build this schema from api/models.py on SQLite; production builds
     it from db/migrations.sql on Postgres. Nothing else compares the two, so an
     index added to one and not the other is invisible until a slow query.
+
+    Both HALVES of the index are compared against the model: the predicate and
+    the column list, each rendered from api/models.py. The version this
+    replaces checked the predicate model-to-DDL but the columns DDL-to-a-literal
+    typed into this file, so the model's index columns were never read at all -
+    reordering them, which changes which queries the index can serve, left all
+    three tests passing.
     """
     import re
     from pathlib import Path
+
+    from sqlalchemy.dialects import postgresql
 
     from api.models import ChatMessage
 
     index = {ix.name: ix for ix in ChatMessage.__table__.indexes}["idx_chat_messages_corpus"]
     predicate = str(index.dialect_options["postgresql"]["where"])
+
+    # Render the model's own index expressions - names AND sort order, in
+    # order - the way Postgres would see them. `.desc()` is not decoration:
+    # a btree scan can only walk the leading columns in their declared
+    # direction, which is the whole reason this index exists.
+    dialect = postgresql.dialect()
+    columns = ", ".join(
+        str(expression.compile(dialect=dialect)).replace("chat_messages.", "")
+        for expression in index.expressions)
+    assert columns == "favorite_count DESC, created_at", (
+        "guard against SQLAlchemy rendering these differently; if this fails "
+        "and the model is right, fix the expected string here and re-check "
+        "db/migrations.sql by hand")
 
     sql = Path(__file__).resolve().parent.parent.joinpath("db/migrations.sql").read_text()
     declared = re.search(
@@ -67,7 +89,7 @@ def test_the_corpus_index_matches_the_migration_sql():
         r"ON chat_messages \((?P<cols>[^)]*)\)\s+WHERE (?P<where>[^;]+);", sql)
 
     assert declared, "idx_chat_messages_corpus is missing from db/migrations.sql"
-    assert declared.group("cols").strip() == "favorite_count DESC, created_at"
+    assert declared.group("cols").strip() == columns
     assert declared.group("where").strip() == predicate
 
     # The two single-column indexes this replaced served neither the filter nor
