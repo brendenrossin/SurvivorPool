@@ -132,9 +132,19 @@ def resolve_pick_week(db, season: int) -> Optional[int]:
     it avoids comparing a Python `now` against a kickoff column - naive on
     SQLite, aware on Postgres, TypeError where they meet.
     """
-    unplayed = (db.query(func.min(Game.week))
-                  .filter(Game.season == season, Game.status == "pre")
-                  .scalar())
+    # Never look behind the furthest week that has actually started. A
+    # postponed game keeps its week at "pre" indefinitely, and taking the
+    # first such week would strand the tally on that week for the rest of the
+    # season while everyone else is picking the current one.
+    started = (db.query(func.max(Game.week))
+                 .filter(Game.season == season, Game.status != "pre")
+                 .scalar())
+
+    unplayed = db.query(func.min(Game.week)).filter(
+        Game.season == season, Game.status == "pre")
+    if started is not None:
+        unplayed = unplayed.filter(Game.week >= started)
+    unplayed = unplayed.scalar()
     if unplayed is not None:
         return unplayed
     # Season over, or every game already settled: stay on the last real week

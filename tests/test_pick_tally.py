@@ -217,3 +217,20 @@ def test_one_sender_renaming_themselves_still_counts_once(two_weeks):
         name="Michael")
     two_weeks.flush()
     assert tally_unconfirmed(two_weeks, 2026, 1) == {"JAX": 1}
+
+
+def test_pick_week_ignores_a_stray_unplayed_game_in_an_earlier_week(db):
+    """A postponed game keeps its week's status at "pre" indefinitely. Taking
+    the first such week would strand the tally on week 1 for the rest of the
+    season while everyone is picking week 3."""
+    add_game(db, 2026, 1, WEEK1_KICK, "LAC", "JAX")
+    add_game(db, 2026, 1, WEEK1_KICK + timedelta(hours=3), "DEN", "PHI")
+    add_game(db, 2026, 2, WEEK2_KICK, "BUF", "MIA")
+    add_game(db, 2026, 3, WEEK2_KICK + timedelta(days=7), "KC", "LV")
+    db.flush()
+    set_status(db, 2026, 1, "final")
+    set_status(db, 2026, 2, "final")
+    # Week 1's second game never got played and is still sitting at "pre".
+    db.query(Game).filter(Game.game_id == "2026-1-DEN-PHI").one().status = "pre"
+    db.flush()
+    assert resolve_pick_week(db, 2026) == 3

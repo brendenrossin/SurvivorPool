@@ -35,12 +35,21 @@ def build_tally_view(data: Mapping[str, Any],
 
     Kept free of Streamlit so the copy and the bar geometry can be asserted
     directly - what the widget says is the part most worth testing.
+
+    `hidden` is the whole of the draw/do-not-draw decision, so the caller never
+    has to re-derive it.
     """
     week = data.get("week")
     teams: List[tuple] = list(data.get("teams") or [])
     unconfirmed = int(data.get("unconfirmed") or 0)
     confirmed = int(data.get("confirmed") or 0)
-    empty = week is None or not teams
+
+    # The card earns its place only while the GroupMe knows picks the confirmed
+    # count does not. Once the manager has caught up, the picks grid directly
+    # above already shows everything this would, and a second, smaller, lower
+    # number beside it reads as a contradiction rather than as extra
+    # information. Ties are hidden for the same reason: nothing new to add.
+    hidden = week is None or not teams or unconfirmed <= confirmed
 
     biggest = max((count for _, count in teams), default=0)
     rows = [{
@@ -50,22 +59,14 @@ def build_tally_view(data: Mapping[str, Any],
         "color": contrast_fill(colors.get(team) or FALLBACK_COLOR, SURFACE),
     } for team, count in teams[:MAX_ROWS]]
 
-    # The jab only fires when it is true. If the manager is current there is no
-    # joke to make, and a bit resting on a false premise is worse than none.
-    jab = not empty and unconfirmed > confirmed
-
-    if empty:
-        caption = ("No picks spotted in the GroupMe for this week yet.")
-    elif jab:
-        caption = (f"{unconfirmed} picks pulled from GroupMe while we wait for "
-                   f"{MANAGER} to officially update picks.")
-    else:
-        caption = ("Pulled from GroupMe. Unofficial until picks are confirmed.")
+    # Being visible and making the joke are now the same condition, so there is
+    # no second caption: any card that draws is a card whose premise is true.
+    caption = (f"{unconfirmed} picks pulled from GroupMe while we wait for "
+               f"{MANAGER} to officially update picks.")
 
     return {
         "week": week,
-        "empty": empty,
-        "jab": jab,
+        "hidden": hidden,
         "rows": rows,
         "caption": caption,
         "heading": f"Week {week} picks, pulled from GroupMe" if week
@@ -144,14 +145,17 @@ def render_unconfirmed_picks_widget(season: int) -> bool:
     """
     try:
         data = get_unconfirmed_tally(season)
-    except Exception as exc:  # pragma: no cover - defensive, as elsewhere
-        st.warning(f"⚠️ Could not read GroupMe picks: {exc}")
+    except Exception as exc:
+        # Type only, never str(exc): a psycopg OperationalError quotes the
+        # database host, and this renders on a page anyone with the link can
+        # read. Same reasoning as jobs/groupme_shared.unexpected_error_message.
+        st.warning(f"⚠️ Could not read GroupMe picks ({type(exc).__name__}).")
         return False
 
     colors = {team: meta.get("color", FALLBACK_COLOR)
               for team, meta in load_team_data()["teams"].items()}
     view = build_tally_view(data, colors)
-    if view["empty"]:
+    if view["hidden"]:
         return False
 
     st.markdown(_view_html(view), unsafe_allow_html=True)

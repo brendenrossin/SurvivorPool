@@ -32,24 +32,30 @@ def test_rows_keep_the_order_they_were_given():
     assert [r["team"] for r in v["rows"]] == ["LAC", "JAX", "DET", "PIT"]
 
 
-def test_the_jab_fires_when_the_chat_is_ahead():
+def test_the_card_shows_and_jokes_when_the_groupme_is_ahead():
     v = view(46, 10, [("LAC", 22)])
-    assert v["jab"] is True
+    assert v["hidden"] is False
     # Not `MANAGER in caption`: an empty MANAGER makes that vacuously true.
     assert MANAGER and MANAGER in v["caption"]
     assert "officially update picks" in v["caption"]
 
 
-def test_the_jab_does_not_fire_when_the_manager_is_current():
-    """A bit that fires on a false premise is worse than no bit."""
+def test_the_card_is_hidden_once_the_manager_has_caught_up():
+    """The picks grid directly above already shows everything this would, so a
+    second, smaller, lower number beside it reads as a contradiction."""
     v = view(10, 46, [("LAC", 6)])
-    assert v["jab"] is False
-    assert "officially update picks" not in v["caption"]
+    assert v["hidden"] is True
 
 
-def test_the_jab_does_not_fire_on_a_tie():
+def test_the_card_is_hidden_on_a_tie():
+    """A tie adds nothing the confirmed count has not already said."""
     v = view(10, 10, [("LAC", 6)])
-    assert v["jab"] is False
+    assert v["hidden"] is True
+
+
+def test_one_more_than_confirmed_is_enough_to_show():
+    """The boundary is strict: hidden at equal, shown at one ahead."""
+    assert view(11, 10, [("LAC", 6)])["hidden"] is False
 
 
 @pytest.mark.parametrize("unconfirmed,confirmed,teams", [
@@ -68,22 +74,26 @@ def test_copy_never_mentions_the_sheet(unconfirmed, confirmed, teams):
     assert "spreadsheet" not in words
 
 
-def test_every_state_says_the_picks_came_from_groupme():
-    for v in (view(46, 10, [("LAC", 22)]), view(10, 46, [("LAC", 6)])):
-        assert "groupme" in v["caption"].lower()
+def test_any_card_that_draws_says_it_came_from_groupme():
+    assert "groupme" in view(46, 10, [("LAC", 22)])["caption"].lower()
 
 
-def test_an_empty_tally_is_marked_empty_and_makes_no_joke():
+def test_a_tally_with_no_teams_is_hidden():
     v = view(0, 12, [])
-    assert v["empty"] is True
-    assert v["jab"] is False
+    assert v["hidden"] is True
     assert v["rows"] == []
 
 
-def test_a_season_with_no_week_is_empty():
+def test_a_tally_with_no_teams_is_hidden_even_with_nothing_confirmed():
+    """Hidden for want of data, not merely because confirmed is ahead."""
+    assert view(0, 0, [])["hidden"] is True
+
+
+def test_a_season_with_no_week_is_hidden():
     v = build_tally_view(
-        {"week": None, "unconfirmed": 0, "confirmed": 0, "teams": []}, COLORS)
-    assert v["empty"] is True
+        {"week": None, "unconfirmed": 9, "confirmed": 0, "teams": [("LAC", 9)]},
+        COLORS)
+    assert v["hidden"] is True
 
 
 def test_an_unknown_team_still_gets_a_usable_colour():
