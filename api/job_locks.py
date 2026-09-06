@@ -55,35 +55,65 @@ def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
     This ensures only ONE job can modify picks/pick_results at a time,
     preventing race conditions between sheet ingestion and score updates.
 
+    The lock is taken on its own connection, checked out from the engine for
+    the whole lifetime of the context and closed afterwards. It deliberately
+    does NOT ride on `db`.
+
+    ``pg_try_advisory_lock`` is session-scoped: the lock belongs to the DBAPI
+    connection that took it, and only that connection can release it. `db`
+    cannot offer that guarantee, because callers commit inside this block -
+    jobs/groupme_shared.store_in_batches commits once per batch - and a commit
+    returns the connection to the pool. api/database.py creates the engine with
+    no pool arguments, so that is SQLAlchemy's default QueuePool holding five
+    connections, not one. A single-threaded job checking back out of an idle
+    pool will usually get the same connection, which is why this worked; it was
+    luck, not mutual exclusion. Land a later batch on a different connection and
+    two jobs run concurrently while believing they hold the lock, and the
+    unlock returns false, stranding the lock on the original connection until
+    the pool recycles it - after which every run records "skipped" forever.
+
+    A dedicated connection makes the invariant structural: the connection that
+    acquires the lock is the connection that releases it, and it is never
+    returned to the pool in between.
+
+    Runs in AUTOCOMMIT so the lock connection does not sit `idle in
+    transaction` for the length of a job, which would hold back vacuum. Session
+    advisory locks are independent of transaction state, so this costs nothing.
+
     Args:
-        db: SQLAlchemy session
+        db: SQLAlchemy session. Used only to find the engine - no lock
+            statement is issued on it.
         lock_id: Unique integer identifier for this lock
-        timeout_seconds: Max time to wait for lock (default 5 minutes)
+        timeout_seconds: Accepted for backwards compatibility. Unused:
+            pg_try_advisory_lock does not wait, it reports and returns.
 
     Raises:
         LockContentionError: If another session already holds the lock. It is a
             RuntimeError, so pre-existing ``except RuntimeError`` handlers are
             unaffected.
     """
-    # Check if we're using SQLite (which doesn't support advisory locks)
-    engine_name = db.bind.dialect.name
+    engine = db.bind
+
+    # SQLite has no advisory locks. Documented no-op: dev and the whole test
+    # suite run there, and single-process dev has nothing to race with.
+    engine_name = engine.dialect.name
     if engine_name == "sqlite":
-        # SQLite doesn't support advisory locks, just skip locking
         print("⚠️  SQLite detected - skipping advisory lock (dev mode)")
         yield
         return
 
     print(f"🔒 Attempting to acquire advisory lock {lock_id}...")
 
+    lock_connection = engine.connect().execution_options(
+        isolation_level="AUTOCOMMIT")
     try:
-        # Try to acquire lock with timeout
         # pg_try_advisory_lock returns True if lock acquired, False otherwise
-        result = db.execute(
+        acquired = lock_connection.execute(
             text("SELECT pg_try_advisory_lock(:lock_id)"),
             {"lock_id": lock_id}
         ).scalar()
 
-        if not result:
+        if not acquired:
             # The words "advisory lock" are load-bearing until
             # jobs/sheets_ingestion_shared.py and jobs/update_scores.py stop
             # matching on them; tests/test_job_locks.py pins that substring
@@ -95,13 +125,17 @@ def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
 
         print(f"✅ Advisory lock {lock_id} acquired")
 
-        yield
-
-    finally:
-        # Always release the lock
-        if engine_name == "postgresql":
-            db.execute(
+        try:
+            yield
+        finally:
+            # Only unlocks a lock this call actually took. The unconditional
+            # release this replaced also fired on the contention path, asking
+            # Postgres to drop a lock held by somebody else and logging a
+            # warning for a routine skip.
+            lock_connection.execute(
                 text("SELECT pg_advisory_unlock(:lock_id)"),
                 {"lock_id": lock_id}
             )
             print(f"🔓 Advisory lock {lock_id} released")
+    finally:
+        lock_connection.close()
