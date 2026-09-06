@@ -42,9 +42,10 @@ definition-of-done item below is met:
 
 | ID | Ticket | Est. | Status | Spec |
 |----|--------|------|--------|------|
-| DEBT-1 | Test sessions use `autoflush=True`; production uses `autoflush=False` | 0.5d | **Backlog** | — |
-| DEBT-2 | Nothing compares `api/models.py` to `db/migrations.sql` | 0.5d | **Backlog** | — |
-| DEBT-3 | `test_ingest_job_meta.py` reads `NFL_SEASON` from the developer's `.env` | 0.25d | **Backlog** | — |
+| DEBT-1 | Test sessions use `autoflush=True`; production uses `autoflush=False` | 0.5d | **Review** | — |
+| DEBT-2 | Nothing compares `api/models.py` to `db/migrations.sql` | 0.5d | **Review** | — |
+| DEBT-3 | `test_ingest_job_meta.py` reads `NFL_SEASON` from the developer's `.env` | 0.25d | **Review** | — |
+| DEBT-4 | Advisory lock can be released by a connection that does not hold it | 0.5d | **Review** | — |
 
 - **DEBT-1** — every test in the repo runs under different flush semantics than
   production. This masked a real bug during GRPM-1: deleting a load-bearing
@@ -58,6 +59,17 @@ definition-of-done item below is met:
   `.env`. It is red on any machine set to 2025 and green otherwise. The test should
   pin its own season instead of inheriting the developer's environment. Note the
   local `.env` is also stale: it says 2025 while both databases carry 2026 data.
+- **DEBT-4** — `pg_try_advisory_lock` is session-scoped, but `advisory_lock()` took
+  it on the caller's session while callers commit inside the block, and a commit
+  returns the connection to the pool. The engine uses the default `QueuePool` of
+  five, so this held only because a single-threaded job usually gets the same
+  connection back. Filed during the DEBT-1..3 work and fixed alongside them.
+
+All four are implemented on `feature/test-infra-debt`; see
+`.superpowers/sdd/2026-09-05-groupme-ingestion/debt-report.md`. DEBT-1 surfaced a
+live production bug it had been masking — sheet ingestion recomputed eliminations
+against an empty pick set on every run — and DEBT-2 found column drift as well as
+the index drift it was filed for.
 
 **Dependencies**
 

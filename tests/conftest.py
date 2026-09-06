@@ -23,7 +23,12 @@ def db():
         cursor.close()
 
     Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+    # autoflush=False mirrors api/database.py's SessionLocal. Production runs
+    # under those flush semantics, so the tests must too: an autoflushing test
+    # session silently supplies a flush that production would not, which once
+    # let a load-bearing db.flush() be deleted from api/chat_store.py with the
+    # whole suite still green.
+    session = sessionmaker(bind=engine, autoflush=False)()
     try:
         yield session
     finally:
@@ -61,37 +66,91 @@ def seeded_db(db):
     return db
 
 
+class _FakeResult:
+    def __init__(self, value):
+        self._value = value
+
+    def scalar(self):
+        return self._value
+
+
+class _FakeConnection:
+    """One checked-out connection. Records what ran on it and when it closed.
+
+    Advisory locks are per-connection, so which connection a statement lands
+    on is the entire property under test - a fake that pools everything into
+    one statement log could not tell a correct implementation from the broken
+    one it replaced.
+    """
+
+    def __init__(self, engine, acquired: bool):
+        self.engine = engine
+        self._acquired = acquired
+        self.statements: list[str] = []
+        self.closed = False
+        self.isolation_level = None
+
+    def execution_options(self, **options):
+        self.isolation_level = options.get("isolation_level")
+        return self
+
+    def execute(self, statement, params=None):
+        assert not self.closed, "statement issued on a closed connection"
+        self.statements.append(str(statement))
+        if "pg_try_advisory_lock" in str(statement):
+            return _FakeResult(self._acquired)
+        return _FakeResult(True)
+
+    def close(self):
+        self.closed = True
+        self.engine.checkins.append(self)
+
+
+class _FakeEngine:
+    class _Dialect:
+        name = "postgresql"
+
+    def __init__(self, acquired: bool):
+        self.dialect = self._Dialect()
+        self._acquired = acquired
+        self.connections: list[_FakeConnection] = []
+        self.checkins: list[_FakeConnection] = []
+
+    def connect(self):
+        connection = _FakeConnection(self, self._acquired)
+        self.connections.append(connection)
+        return connection
+
+
 class _FakePostgresSession:
     """A session that looks like Postgres to api/job_locks.advisory_lock().
 
     Advisory locks do not exist on SQLite - advisory_lock() skips the whole
     mechanism there - so reaching its real raise site needs a stand-in that
     reports the postgresql dialect and answers pg_try_advisory_lock. No network
-    and no database: only enough surface for that one function.
+    and no database: only enough surface for that one function, plus an engine
+    that hands out distinguishable connections so the lock's connection
+    discipline can be asserted.
     """
 
-    class _Dialect:
-        name = "postgresql"
-
-    class _Bind:
-        dialect = None
-
-    class _Result:
-        def __init__(self, value):
-            self._value = value
-
-        def scalar(self):
-            return self._value
-
     def __init__(self, acquired: bool = False):
-        self.bind = self._Bind()
-        self.bind.dialect = self._Dialect()
-        self._acquired = acquired
+        self.bind = _FakeEngine(acquired)
         self.statements: list[str] = []
+        self.commits = 0
+
+    @property
+    def connections(self):
+        """Connections advisory_lock() checked out of the engine."""
+        return self.bind.connections
 
     def execute(self, statement, params=None):
         self.statements.append(str(statement))
-        return self._Result(self._acquired)
+        return _FakeResult(True)
+
+    def commit(self):
+        """Callers commit inside the lock. That is what used to return the
+        lock's connection to the pool."""
+        self.commits += 1
 
 
 @pytest.fixture

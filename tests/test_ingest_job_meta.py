@@ -7,7 +7,7 @@ reported a stale timestamp forever regardless of what ingestion actually did.
 
 import pytest
 
-from api.models import JobMeta, Pick, Player
+from api.models import JobMeta, Pick
 from jobs import sheets_ingestion_shared as shared
 from jobs.sheets_ingestion_shared import (
     INGEST_JOB_NAME,
@@ -16,13 +16,26 @@ from jobs.sheets_ingestion_shared import (
 )
 
 
+# The season these tests ingest under. `ingest_players_and_picks` reads
+# NFL_SEASON at call time and api/database.py's load_dotenv() puts the
+# developer's .env into the environment, so without pinning it here a test
+# asserting on a season number passes or fails according to local config
+# rather than according to the code. Any value works; it just has to be this
+# file's choice and not the machine's.
+SEASON = 2026
+
+
 @pytest.fixture
 def persistent_db(db, monkeypatch):
     """Point ingestion at the test session and keep it open afterwards.
 
     `ingest_players_and_picks` closes the session it is handed, which would
     leave nothing to assert against.
+
+    Also pins NFL_SEASON: every test using this fixture runs real ingestion,
+    and ingestion's season comes from the environment.
     """
+    monkeypatch.setenv("NFL_SEASON", str(SEASON))
     monkeypatch.setattr(db, "close", lambda: None)
     monkeypatch.setattr(shared, "SessionLocal", lambda: db)
     return db
@@ -130,4 +143,50 @@ def test_reporting_failure_never_masks_a_successful_ingestion(persistent_db, mon
     )
 
     assert ingest_players_and_picks({"Ada": {1: "BUF"}}) is True
-    assert persistent_db.query(Pick).filter(Pick.season == 2026).count() == 1
+    assert persistent_db.query(Pick).filter(Pick.season == SEASON).count() == 1
+
+
+# --- eliminations must see the picks the same run just ingested -------------
+
+def test_eliminations_run_against_the_picks_just_ingested(persistent_db, monkeypatch):
+    """The flush before process_all_eliminations is load-bearing.
+
+    `SessionLocal` is autoflush=False, so the picks added above it are still
+    pending in the identity map. `process_all_eliminations` opens by querying
+    picks for the season; without the flush it finds none and quietly
+    recomputes eliminations against an empty pick set on every single run.
+    Nothing caught that while the test session autoflushed for it.
+
+    The season comes from `persistent_db`, not from the developer's .env.
+    """
+    seen = []
+
+    from jobs.update_scores import ScoreUpdater
+
+    def spy(self, db, current_week=None):
+        seen.append(db.query(Pick).filter(Pick.season == SEASON).count())
+        return {"picks_updated": 0, "stuck_games_fixed": 0,
+                "missing_pick_eliminations": 0}
+
+    monkeypatch.setattr(ScoreUpdater, "process_all_eliminations", spy)
+
+    ingest_players_and_picks({"Ada": {1: "BUF", 2: "KC"}})
+
+    assert seen == [2], "eliminations ran before the picks were flushed"
+
+
+def test_ingestion_writes_picks_under_the_configured_season(persistent_db, monkeypatch):
+    """NFL_SEASON decides where picks land, and nothing else does.
+
+    Pinned explicitly rather than relying on the fixture's value, so this
+    states the coupling instead of inheriting it. Rolling the season is a
+    two-variable change - see the rollover notes in CLAUDE.md - and this is
+    the half of it that decides which season the rows are written under.
+    """
+    monkeypatch.setenv("NFL_SEASON", "2031")
+
+    ingest_players_and_picks({"Ada": {1: "BUF"}})
+
+    assert persistent_db.query(Pick).filter(Pick.season == 2031).count() == 1
+    assert persistent_db.query(Pick).filter(Pick.season == SEASON).count() == 0
+    assert "season 2031" in _meta(persistent_db).message
