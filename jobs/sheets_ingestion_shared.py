@@ -8,6 +8,8 @@ Both service account and OAuth ingestion methods use this same logic.
 DO NOT DUPLICATE THIS LOGIC - update this file if changes are needed.
 """
 
+import hashlib
+import json
 import os
 from datetime import datetime, timezone
 from sqlalchemy import text
@@ -150,17 +152,93 @@ def _report(db, status, message):
         print(f"⚠️ Could not record job_meta ({status}): {e}")
 
 
-def ingest_players_and_picks(players_data, source_label="google_sheets"):
+FINGERPRINT_JOB_PREFIX = "ingest_sheet_fingerprint"
+
+
+def fingerprint_job_name(season) -> str:
+    """The job_meta key holding one season's last-ingested fingerprint.
+
+    Keyed per season so rolling to a new one cannot inherit the old season's
+    fingerprint and skip its first ingestion.
+    """
+    return f"{FINGERPRINT_JOB_PREFIX}:{season}"
+
+
+def picks_fingerprint(players_data) -> str:
+    """A stable hash of the parsed picks.
+
+    Deliberately over the PARSED picks rather than the raw sheet rows. A
+    reordered column, a formatting change or a new column parse_picks_data does
+    not recognise would all change the raw bytes while changing nothing anyone
+    cares about, and each would trigger a full clear-and-reingest. Hashing what
+    was actually understood means only a real pick change costs anything.
+
+    Sorted keys, because the API returns rows in no guaranteed order and order
+    must not read as a change. Week keys are stringified so a JSON round trip
+    cannot alter the hash.
+    """
+    canonical = {
+        str(player): {str(week): team for week, team in sorted(weeks.items())}
+        for player, weeks in players_data.items()
+    }
+    encoded = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def read_fingerprint(db, season):
+    """The fingerprint of the last ingestion for `season`, or None."""
+    row = db.query(JobMeta).filter(
+        JobMeta.job_name == fingerprint_job_name(season)).first()
+    return row.message if row else None
+
+
+def store_fingerprint(db, season, fingerprint) -> None:
+    """Record what was just ingested, overwriting any previous value."""
+    name = fingerprint_job_name(season)
+    row = db.query(JobMeta).filter(JobMeta.job_name == name).first()
+    if not row:
+        row = JobMeta(job_name=name)
+        db.add(row)
+
+    now = datetime.now(timezone.utc)
+    row.last_run_at = now
+    row.last_success_at = now
+    row.status = "success"
+    row.message = fingerprint
+    db.commit()
+
+
+def ingest_is_unchanged(db, season, fingerprint) -> bool:
+    """Whether re-ingesting `season` would be a no-op.
+
+    Requires BOTH a matching fingerprint and picks actually present. A database
+    that lost its picks while keeping the job_meta row would otherwise skip the
+    very re-ingest that repairs it, permanently and silently.
+    """
+    if read_fingerprint(db, season) != fingerprint:
+        return False
+    return db.query(Pick).filter(Pick.season == season).first() is not None
+
+
+def ingest_players_and_picks(players_data, source_label="google_sheets",
+                             force=False):
     """Insert/update players and picks in database
 
     This is the GOLD STANDARD ingestion logic used by all methods.
 
+    Skips the whole thing when the sheet has not changed since the last run,
+    which is what makes an hourly schedule safe rather than merely cheap: the
+    ingestion clears the season before rebuilding it, so every run is a window
+    in which a partial read leaves the season thin. Fingerprinting keeps that
+    window rare instead of hourly.
+
     Args:
         players_data: dict of {player_name: {week: team}}
         source_label: string to mark the source of picks
+        force: ingest even if the fingerprint says nothing changed
 
     Returns:
-        bool: True if successful, False otherwise
+        bool: True if successful (including a skip), False otherwise
     """
     db = SessionLocal()
 
@@ -170,6 +248,17 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
         # Acquire advisory lock to prevent concurrent execution with score updates
         with advisory_lock(db, LOCK_INGESTION_AND_SCORING):
             season = int(os.getenv('NFL_SEASON', 2025))
+            fingerprint = picks_fingerprint(players_data)
+
+            # Checked inside the lock: a concurrent run that finished between
+            # the fetch and here has already done this work, and outside the
+            # lock both runs would read "changed" and both would rebuild.
+            if not force and ingest_is_unchanged(db, season, fingerprint):
+                print(f"⏭️  Sheet unchanged since last ingestion "
+                      f"(fingerprint {fingerprint[:12]}), nothing to do")
+                _report(db, "skipped",
+                        f"sheet unchanged (fingerprint {fingerprint[:12]})")
+                return True
 
             # Clear this season's picks so they can be re-ingested from the sheet.
             # Prior seasons are left untouched - see clear_season_data().
@@ -263,6 +352,11 @@ def ingest_players_and_picks(players_data, source_label="google_sheets"):
                 f"({players_created} new players, {picks_created} new picks, "
                 f"{picks_updated} updated)"
             ))
+
+            # Last, and only on the success path: a fingerprint written before
+            # the ingestion finished would mark a half-done run as current and
+            # skip the retry that would complete it.
+            store_fingerprint(db, season, fingerprint)
 
         return True
 
