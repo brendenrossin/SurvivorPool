@@ -53,21 +53,27 @@ left for later, with enough context to pick up cold.
   per-point `hovertemplate` array, so `customdata` could be kept with a sentinel
   row for the anchor if the structured assertion is wanted back.
 
-## Out of scope for this branch — `start.sh` is owned by `chore/start-sh-cleanup`
+## Done on this branch after all (owner asked for them here)
 
-- **`start.sh` logs the first ~8 characters of the database password.**
-  `echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."` — 30 characters is past
-  `postgresql://postgres:` and into the password, written to Railway deploy logs
-  on every container boot. Pre-existing. **Fix on the start.sh branch.**
+Both `start.sh` items were initially deferred to `chore/start-sh-cleanup` and then
+pulled into this PR at the owner's request. That branch touches neither line, so
+the merge is clean.
 
-- **`--client.showErrorDetails=none`.** Streamlit 1.50 defaults to `full`, and
-  nothing in `.streamlit/config.toml` or `start.sh` overrides it, so any
-  unguarded exception renders its traceback to pool members — and psycopg2's
-  connection errors carry the production host and user. Every render path in
-  `app/main.py` is now individually guarded, so this is defence in depth rather
-  than an open hole, but it is the change that makes the class impossible.
+- ~~`start.sh` logs the first ~8 characters of the database password.~~ Now prints
+  `${DATABASE_URL##*@}` — host, port and database name, never credentials. The
+  host is the part worth logging anyway: production and staging have separate
+  databases, and CLAUDE.md's rollover notes turn on checking which one you are
+  pointed at.
+- ~~`--client.showErrorDetails`.~~ Set to `none` on the `exec streamlit run` line.
+  Deliberately not in `.streamlit/config.toml`, so a local `streamlit run` still
+  shows full tracebacks while developing.
+
+## Still open
 
 - **`create_engine(DATABASE_URL, pool_pre_ping=True)`** in `api/database.py`.
   Railway's Postgres proxy drops idle connections and there is no `pool_pre_ping`
   or `pool_recycle`, so the first query on a stale pooled connection raises
-  `OperationalError`. This is the most common trigger for the guarded paths above.
+  `OperationalError`. This is the most common trigger for the guarded render
+  paths, and the one remaining piece of that finding. Left out here because it
+  changes connection behaviour for every job and page, which deserves its own
+  change rather than riding along with a chart fix.
