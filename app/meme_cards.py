@@ -14,9 +14,62 @@ from app.theme import BORDER, INK, INK_MUTED
 
 MAX_CARDS = 5
 
+# A loss that beat the spread is still a loss, and if it took half the pool with
+# it that is the story of the week. The floor keeps such a pick on the board
+# instead of scoring it zero or negative and sorting it below a one-entrant one.
+MIN_SHOCK = 1
+
+
+def upset_shock(margin, point_spread, was_favorite):
+    """How much worse the result was than the market expected, in points.
+
+    A 10-point favourite losing by 12 is a 22-point swing; a 3-point underdog
+    losing by 21 is only 18, because 3 of those points were priced in. Ranking
+    on raw margin got this exactly backwards - it put a team that was *expected*
+    to lose at the top of a list about dumb picks.
+
+    Falls back to the raw margin when no spread was recorded, which is the
+    common case: 2025 has odds for 31 of its 240 games, and a week's spreads
+    only land once the odds job has run. Without the fallback the section would
+    empty out across most of the history.
+    """
+    if point_spread is None:
+        return margin
+    return margin + (point_spread if was_favorite else -point_spread)
+
+
+def dumbness_score(margin, point_spread, was_favorite, eliminated_count):
+    """Rank key for the dumbest picks: how wrong it was, times how many it took.
+
+    Owner's definition, chosen over ranking on either factor alone: a pick is
+    dumb in proportion to how safe it looked and how much of the pool believed
+    it. LAC in 2026 week 1 - a 10-point favourite that lost by 12 and ended 118
+    of 300 entrants - is the case this is calibrated against.
+    """
+    shock = upset_shock(margin, point_spread, was_favorite)
+    return max(shock, MIN_SHOCK) * eliminated_count
+
+
+def _favourite_badge(pick):
+    """`10-PT FAVORITE` when the market had the picked team winning.
+
+    Only for favourites: labelling a 3-point underdog is noise, and the whole
+    point of the badge is to explain why a 12-point loss outranks a 21-point one.
+    """
+    spread = pick.get("point_spread")
+    if not pick.get("was_favorite") or not spread:
+        return []
+    points = int(spread) if float(spread).is_integer() else spread
+    return [f"{points}-PT FAVORITE"]
+
 
 def dumbest_card_rows(picks):
-    """Shape the worst beatings for display, worst first."""
+    """Shape the worst beatings for display, worst first.
+
+    Order is decided by the caller - `dumbness_score` - not here. The score
+    itself is deliberately never shown: "2596" means nothing on a card, while
+    the two numbers it is built from mean everything.
+    """
     rows = []
     for rank, pick in enumerate(picks[:MAX_CARDS], start=1):
         count = pick["eliminated_count"]
@@ -27,7 +80,7 @@ def dumbest_card_rows(picks):
             "matchup": f"{pick['team']} vs {pick['opponent']}",
             "week": f"Week {pick['week']}",
             "detail": f"{count} player{'' if count == 1 else 's'} eliminated",
-            "badges": [],
+            "badges": _favourite_badge(pick),
         })
     return rows
 
