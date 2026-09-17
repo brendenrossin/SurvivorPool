@@ -19,6 +19,35 @@ _WASH_FAINT = "rgba(245,158,11,0.10)"
 
 WORST_STRETCH_SPAN = 3
 
+# The curve opens on the field before a single game was played. It is not a
+# week - there is no week 0 - so it is drawn at x=0 and labelled.
+ANCHOR_X = 0
+ANCHOR_LABEL = "Start"
+
+
+def _series_points(rows):
+    """x, y and hover text for the curve, including the pre-week-1 anchor.
+
+    The anchor is `rows[0]["entering"]`: the field at the start of the first
+    played week, which is the number everyone entered with. Two things go wrong
+    without it. A season one week old is a single point, and `mode="lines"`
+    draws a one-point line as nothing at all - the KPI sparkline rendered an
+    empty 44px box for the whole of week 1. And the first and largest drop of
+    the season, 300 to 179 in 2026, never appears: the curve starts at the
+    survivors and the field it came from is only ever a caption.
+
+    Returns parallel lists so both figures share one definition of the curve.
+    """
+    entered = rows[0]["entering"]
+    xs = [ANCHOR_X] + [r["week"] for r in rows]
+    ys = [entered] + [r["remaining"] for r in rows]
+    hover = [f"{ANCHOR_LABEL}<br>{entered:,} entered"] + [
+        f"Week {r['week']}<br>{r['remaining']:,} still alive<br>"
+        f"{r['eliminated']:,} out ({r['pct_out']}%)"
+        for r in rows
+    ]
+    return xs, ys, hover
+
 
 def build_sparkline(rows):
     """A tiny remaining-players trace for the KPI card. No axes, no labels."""
@@ -26,9 +55,10 @@ def build_sparkline(rows):
     if not rows:
         return fig
 
+    xs, ys, _ = _series_points(rows)
     fig.add_trace(go.Scatter(
-        x=[r["week"] for r in rows],
-        y=[r["remaining"] for r in rows],
+        x=xs,
+        y=ys,
         mode="lines",
         line=dict(color=ACCENT, width=2, shape="spline", smoothing=0.5),
         fill="tozeroy",
@@ -54,19 +84,22 @@ def build_attrition_chart(rows, current_week=None):
         return fig
 
     weeks = [r["week"] for r in rows]
+    xs, ys, hover = _series_points(rows)
     fig.add_trace(go.Scatter(
-        x=weeks,
-        y=[r["remaining"] for r in rows],
+        x=xs,
+        y=ys,
         mode="lines+markers",
         line=dict(color=ACCENT, width=3),
-        marker=dict(size=7, color=ACCENT),
+        # The anchor is muted and a size smaller than the played weeks: it is
+        # where the field started, not a week anyone survived.
+        marker=dict(
+            size=[6] + [7] * len(rows),
+            color=[INK_MUTED] + [ACCENT] * len(rows),
+        ),
         fill="tozeroy",
         fillcolor=_WASH_FAINT,
-        customdata=[[r["eliminated"], r["pct_out"]] for r in rows],
-        hovertemplate=(
-            "Week %{x}<br>%{y} still alive<br>"
-            "%{customdata[0]} out (%{customdata[1]}%)<extra></extra>"
-        ),
+        hovertext=hover,
+        hovertemplate="%{hovertext}<extra></extra>",
     ))
 
     if current_week is not None and current_week in weeks:
@@ -79,8 +112,12 @@ def build_attrition_chart(rows, current_week=None):
         height=280,
         margin=dict(l=8, r=8, t=8, b=28),
         font=dict(family=FONT_STACK, size=12, color=INK),
+        # Explicit ticks rather than dtick=1, so x=0 reads "Start" instead of
+        # naming a week that does not exist.
         xaxis=dict(title=None, tickfont=dict(color=INK_MUTED, size=11),
-                   gridcolor=BORDER, dtick=1),
+                   gridcolor=BORDER, tickmode="array",
+                   tickvals=[ANCHOR_X] + weeks,
+                   ticktext=[ANCHOR_LABEL] + [f"W{w}" for w in weeks]),
         yaxis=dict(title=None, tickfont=dict(color=INK_MUTED, size=11),
                    gridcolor=BORDER, rangemode="tozero"),
         paper_bgcolor="rgba(0,0,0,0)",

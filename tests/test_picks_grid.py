@@ -25,6 +25,7 @@ from app.picks_grid import (
     mute_color,
     relative_luminance,
     resolve_current_week,
+    resolve_display_week,
     select_grid_rows,
 )
 
@@ -152,6 +153,53 @@ class TestResolveCurrentWeek:
 
     def test_no_picks_at_all(self):
         assert resolve_current_week(pick_weeks=[], started_game_weeks=[]) == 1
+
+
+class TestResolveDisplayWeek:
+    """The grid used to sit on a settled week until the next one kicked off,
+    while the scoreboard had already rolled - the two halves of the page
+    disagreed about what week it was for three days. The roll now waits for
+    picks rather than for kickoff."""
+
+    FINISHED = ["final"] * 16
+    UNPLAYED = ["pre"] * 16
+    UNDERWAY = ["final"] * 8 + ["in"] + ["pre"] * 7
+
+    def test_rolls_once_the_week_is_final_and_the_next_has_picks(self):
+        """2026 on the Tuesday after week 1: 16 finals, 7 week-2 picks in."""
+        assert resolve_display_week(
+            1, {1: self.FINISHED, 2: self.UNPLAYED}, pick_weeks=[1, 2]
+        ) == 2
+
+    def test_holds_while_the_week_is_still_being_played(self):
+        assert resolve_display_week(
+            1, {1: self.UNDERWAY, 2: self.UNPLAYED}, pick_weeks=[1, 2]
+        ) == 1
+
+    def test_holds_when_the_next_week_has_no_picks_yet(self):
+        """The gate the scoreboard does not need: an empty newest column is
+        worse than a grid a few days behind."""
+        assert resolve_display_week(
+            1, {1: self.FINISHED, 2: self.UNPLAYED}, pick_weeks=[1]
+        ) == 1
+
+    def test_holds_when_the_next_week_has_no_schedule(self):
+        """The sheet outlives the fixture list - picks must not roll the grid
+        off the end of the season."""
+        assert resolve_display_week(
+            18, {18: self.FINISHED}, pick_weeks=[18, 19]
+        ) == 18
+
+    def test_holds_when_the_week_has_no_games_at_all(self):
+        assert resolve_display_week(1, {}, pick_weeks=[1, 2]) == 1
+
+    def test_rolls_one_week_at_a_time(self):
+        """resolve_current_week already lands on the last kicked-off week, so
+        a single step is the whole distance."""
+        assert resolve_display_week(
+            1, {1: self.FINISHED, 2: self.FINISHED, 3: self.UNPLAYED},
+            pick_weeks=[1, 2, 3],
+        ) == 2
 
 
 class TestFigureLayout:

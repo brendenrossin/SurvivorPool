@@ -47,6 +47,7 @@ from app.picks_grid import (
     eliminated_fill,
     mute_color,
     resolve_current_week,
+    resolve_display_week,
     select_grid_rows,
 )
 from app.attrition import build_sparkline, describe_worst_stretch
@@ -278,21 +279,28 @@ def render_weekly_picks_chart(summary):
     pick_weeks = sorted(w["week"] for w in summary["weeks"])
 
     # The sheet holds picks for unplayed weeks, so the latest week with a pick
-    # is not "now" - resolve against the weeks whose games have actually
-    # started, and never aggregate past that or we leak next week's picks.
-    current_week = resolve_current_week(pick_weeks, get_started_game_weeks(SEASON))
+    # is not "now": resolve against the weeks whose games have actually
+    # started, then roll forward once that week is settled and the next one has
+    # picks. Without the roll the grid stayed on a finished week until Thursday
+    # while the scoreboard had already moved on - see resolve_display_week.
+    current_week = resolve_display_week(
+        resolve_current_week(pick_weeks, get_started_game_weeks(SEASON)),
+        get_week_game_statuses(SEASON),
+        pick_weeks,
+    )
     weeks = list(range(1, current_week + 1))  # spec: columns are 1..current_week
 
     counts, week_totals, season_totals = aggregate_picks(
         summary["weeks"], current_week
     )
     if not counts:
-        # Reachable when the sheet holds only future weeks: aggregate_picks
-        # clips at the current week, so picks exist but none are publishable.
+        # Reachable when the sheet holds only weeks later than the one on
+        # display: aggregate_picks clips at the current week, so picks exist
+        # but none are publishable yet.
         st.info(
             f"**No picks for week {current_week} or earlier.** The sheet is "
-            "filled in ahead of kickoff, so picks appear here once their "
-            "games start."
+            "filled in ahead of kickoff, so picks appear here once the "
+            "previous week has finished."
         )
         return
 

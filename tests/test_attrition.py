@@ -2,8 +2,8 @@
 
 import pytest
 
-from app.attrition import (build_attrition_chart, build_sparkline,
-                           describe_worst_stretch)
+from app.attrition import (ANCHOR_LABEL, build_attrition_chart,
+                           build_sparkline, describe_worst_stretch)
 
 # The real 2025 opening, including the week 3-5 cliff that motivated this.
 ROWS = [
@@ -15,12 +15,23 @@ ROWS = [
 ]
 
 
+# 2026 after one week. A single row is what broke both figures: `mode="lines"`
+# draws a one-point line as nothing, so the KPI card held an empty box.
+ONE_WEEK = [
+    {"week": 1, "entering": 300, "eliminated": 121, "remaining": 179,
+     "pct_out": 40.3},
+]
+
+
 class TestSparkline:
-    def test_plots_one_point_per_week(self):
-        assert len(build_sparkline(ROWS).data[0].x) == len(ROWS)
+    def test_plots_the_anchor_then_one_point_per_week(self):
+        assert len(build_sparkline(ROWS).data[0].x) == len(ROWS) + 1
+
+    def test_opens_on_the_field_that_entered(self):
+        assert build_sparkline(ROWS).data[0].y[0] == 252
 
     def test_plots_remaining_not_eliminated(self):
-        assert list(build_sparkline(ROWS).data[0].y) == [246, 238, 171, 127, 74]
+        assert list(build_sparkline(ROWS).data[0].y)[1:] == [246, 238, 171, 127, 74]
 
     def test_is_short_enough_to_sit_inside_a_kpi_card(self):
         assert build_sparkline(ROWS).layout.height <= 60
@@ -30,8 +41,12 @@ class TestSparkline:
         assert fig.layout.xaxis.visible is False
         assert fig.layout.yaxis.visible is False
 
-    def test_single_week_still_renders(self):
-        assert len(build_sparkline(ROWS[:1]).data[0].x) == 1
+    def test_a_single_played_week_still_draws_a_line(self):
+        """Two points, not one: a one-point line renders as nothing at all."""
+        assert len(build_sparkline(ONE_WEEK).data[0].x) == 2
+
+    def test_a_single_played_week_shows_the_drop(self):
+        assert list(build_sparkline(ONE_WEEK).data[0].y) == [300, 179]
 
     def test_empty_rows_gives_an_empty_figure_not_a_crash(self):
         assert build_sparkline([]).data == ()
@@ -39,7 +54,20 @@ class TestSparkline:
 
 class TestAttritionChart:
     def test_plots_remaining_not_eliminated(self):
-        assert list(build_attrition_chart(ROWS).data[0].y) == [246, 238, 171, 127, 74]
+        assert list(build_attrition_chart(ROWS).data[0].y)[1:] == [246, 238, 171, 127, 74]
+
+    def test_opens_on_the_field_that_entered(self):
+        fig = build_attrition_chart(ONE_WEEK)
+        assert list(fig.data[0].x) == [0, 1]
+        assert list(fig.data[0].y) == [300, 179]
+
+    def test_labels_the_anchor_rather_than_naming_a_week_zero(self):
+        axis = build_attrition_chart(ROWS).layout.xaxis
+        assert axis.ticktext == (ANCHOR_LABEL, "W1", "W2", "W3", "W4", "W5")
+        assert axis.tickvals == (0, 1, 2, 3, 4, 5)
+
+    def test_anchor_hover_names_the_field_that_entered(self):
+        assert "252 entered" in build_attrition_chart(ROWS).data[0].hovertext[0]
 
     def test_marks_the_current_week(self):
         assert len(build_attrition_chart(ROWS, current_week=3).layout.shapes) >= 1
@@ -51,8 +79,9 @@ class TestAttritionChart:
         assert build_attrition_chart(ROWS, current_week=99).layout.shapes == ()
 
     def test_hover_carries_the_elimination_count(self):
-        fig = build_attrition_chart(ROWS)
-        assert list(fig.data[0].customdata[2]) == [67, 28.2]
+        """Offset by one: index 0 is the anchor, so week 3 is index 3."""
+        hover = build_attrition_chart(ROWS).data[0].hovertext[3]
+        assert "Week 3" in hover and "67 out (28.2%)" in hover
 
     def test_empty_rows_gives_an_empty_figure(self):
         assert build_attrition_chart([]).data == ()
