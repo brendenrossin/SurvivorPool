@@ -3,9 +3,13 @@ Data fetching functions for Streamlit dashboard
 """
 
 import json
+import logging
 import streamlit as st
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.odds_helpers import get_team_name_to_abbr_mapping
+from app.pick_scoring import (rank_dumbest_picks, shape_dumbest_pick,
+                              unmapped_favourite_names)
 from app.week_resolution import week_is_final
 
 try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
@@ -28,6 +32,7 @@ def load_team_data() -> Dict:
     """Load team colors and metadata"""
     with open("db/seed_team_map.json", "r") as f:
         return json.load(f)
+
 
 def _season_player_ids(db, season):
     """Subquery of player_ids who made at least one pick in the given season.
@@ -214,15 +219,24 @@ def get_meme_stats(season: int) -> Dict:
     SessionFactory = get_db_session()
     db = SessionFactory()
     try:
-        # Dumbest picks (biggest losing margins) - grouped by team
+        # Dumbest picks. Ranked by dumbness_score, not by raw margin: the old
+        # ORDER BY margin DESC put DEN vs KC at the top of 2026 week 1 - a team
+        # that was a 3-point *underdog* - above LAC, a 10-point favourite that
+        # lost by 12 and ended 118 of the pool's 300 entrants.
+        #
+        # Ranking happens in Python rather than SQL because the favourite is
+        # stored as a full team name ("Los Angeles Chargers") while picks carry
+        # an abbreviation, and the existing SQL bridges that with a hand-written
+        # 32-way CASE. Scoring here reuses the seed team map instead of adding a
+        # third copy of it, and makes the rank key unit-testable.
         dumbest_query = text("""
             SELECT
                 pi.week,
                 pi.team_abbr,
                 g.home_team,
                 g.away_team,
-                g.home_score,
-                g.away_score,
+                g.point_spread,
+                g.favorite_team,
                 CASE
                     WHEN pi.team_abbr = g.home_team THEN g.away_score - g.home_score
                     ELSE g.home_score - g.away_score
@@ -239,23 +253,25 @@ def get_meme_stats(season: int) -> Dict:
                 AND pr.survived = FALSE
                 AND g.home_score IS NOT NULL
                 AND g.away_score IS NOT NULL
-            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team, g.home_score, g.away_score
-            ORDER BY margin DESC
-            LIMIT 5
+                -- Nobody survives a tie (jobs/update_scores.py), so both teams
+                -- arrive here with survived=FALSE and a margin of 0. Under the
+                -- old ORDER BY margin DESC those sank; the score's floor would
+                -- now let a well-picked tie into the top five as "0 point loss".
+                AND g.home_score != g.away_score
+            GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team,
+                     g.home_score, g.away_score, g.point_spread, g.favorite_team
         """)
 
         dumbest_results = db.execute(dumbest_query, {"season": season}).fetchall()
-
-        dumbest_picks = []
-        for row in dumbest_results:
-            opponent = row.away_team if row.team_abbr == row.home_team else row.home_team
-            dumbest_picks.append({
-                "week": row.week,
-                "team": row.team_abbr,
-                "opponent": opponent,
-                "margin": row.margin,
-                "eliminated_count": row.eliminated_count
-            })
+        name_to_abbr = get_team_name_to_abbr_mapping()
+        unmapped = unmapped_favourite_names(dumbest_results, name_to_abbr)
+        if unmapped:
+            logging.warning(
+                "favorite_team values the team map does not know, so these "
+                "picks rank as underdogs: %s", ", ".join(unmapped))
+        dumbest_picks = rank_dumbest_picks([
+            shape_dumbest_pick(row, name_to_abbr) for row in dumbest_results
+        ])
 
         # Big balls picks (underdog wins - teams that were underdogs and won) - grouped by team
         big_balls_query = text("""

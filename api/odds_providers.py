@@ -9,6 +9,50 @@ from datetime import datetime
 from api.rate_limiter import get_rate_limiter
 import logging
 
+# The Odds API's team vocabulary, and the abbreviations it maps to.
+#
+# Module level rather than a local inside _normalize_team_name because these
+# names are written verbatim into `games.favorite_team` by the spread parser,
+# and `app/pick_scoring.py` has to resolve them back to abbreviations to know
+# whether a picked team was the favourite. A name that drifts here silently
+# demotes that team in the dumbest-picks ranking, so a test pins this against
+# db/seed_team_map.json - see tests/test_meme_cards.py.
+ODDS_API_TEAM_NAMES = {
+    "Arizona Cardinals": "ARI",
+    "Atlanta Falcons": "ATL",
+    "Baltimore Ravens": "BAL",
+    "Buffalo Bills": "BUF",
+    "Carolina Panthers": "CAR",
+    "Chicago Bears": "CHI",
+    "Cincinnati Bengals": "CIN",
+    "Cleveland Browns": "CLE",
+    "Dallas Cowboys": "DAL",
+    "Denver Broncos": "DEN",
+    "Detroit Lions": "DET",
+    "Green Bay Packers": "GB",
+    "Houston Texans": "HOU",
+    "Indianapolis Colts": "IND",
+    "Jacksonville Jaguars": "JAX",
+    "Kansas City Chiefs": "KC",
+    "Las Vegas Raiders": "LV",
+    "Los Angeles Chargers": "LAC",
+    "Los Angeles Rams": "LAR",
+    "Miami Dolphins": "MIA",
+    "Minnesota Vikings": "MIN",
+    "New England Patriots": "NE",
+    "New Orleans Saints": "NO",
+    "New York Giants": "NYG",
+    "New York Jets": "NYJ",
+    "Philadelphia Eagles": "PHI",
+    "Pittsburgh Steelers": "PIT",
+    "San Francisco 49ers": "SF",
+    "Seattle Seahawks": "SEA",
+    "Tampa Bay Buccaneers": "TB",
+    "Tennessee Titans": "TEN",
+    "Washington Commanders": "WAS",
+}
+
+
 class OddsProvider:
     """Base class for odds providers"""
 
@@ -170,40 +214,7 @@ class TheOddsAPIProvider(OddsProvider):
     def _normalize_team_name(self, team_name: str) -> str:
         """Normalize team names to match our system"""
         # The Odds API uses full team names, we need to map to abbreviations
-        mapping = {
-            "Arizona Cardinals": "ARI",
-            "Atlanta Falcons": "ATL",
-            "Baltimore Ravens": "BAL",
-            "Buffalo Bills": "BUF",
-            "Carolina Panthers": "CAR",
-            "Chicago Bears": "CHI",
-            "Cincinnati Bengals": "CIN",
-            "Cleveland Browns": "CLE",
-            "Dallas Cowboys": "DAL",
-            "Denver Broncos": "DEN",
-            "Detroit Lions": "DET",
-            "Green Bay Packers": "GB",
-            "Houston Texans": "HOU",
-            "Indianapolis Colts": "IND",
-            "Jacksonville Jaguars": "JAX",
-            "Kansas City Chiefs": "KC",
-            "Las Vegas Raiders": "LV",
-            "Los Angeles Chargers": "LAC",
-            "Los Angeles Rams": "LAR",
-            "Miami Dolphins": "MIA",
-            "Minnesota Vikings": "MIN",
-            "New England Patriots": "NE",
-            "New Orleans Saints": "NO",
-            "New York Giants": "NYG",
-            "New York Jets": "NYJ",
-            "Philadelphia Eagles": "PHI",
-            "Pittsburgh Steelers": "PIT",
-            "San Francisco 49ers": "SF",
-            "Seattle Seahawks": "SEA",
-            "Tampa Bay Buccaneers": "TB",
-            "Tennessee Titans": "TEN",
-            "Washington Commanders": "WAS"
-        }
+        mapping = ODDS_API_TEAM_NAMES
 
         # If full name provided, try to map it
         if team_name in mapping:

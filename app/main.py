@@ -235,10 +235,24 @@ def main():
         st.divider()
 
     # The donut's half-width column is gone, so search gets the full width.
-    render_player_search()
+    #
+    # These were the last three bare render calls in main(). An earlier commit
+    # claimed every render path was guarded; it was not - the picks grid was
+    # fixed and these were missed. main() is called bare, so an exception here
+    # reaches Streamlit's script runner, and everything below the failure never
+    # renders.
+    try:
+        render_player_search()
+    except Exception:
+        logging.exception("Player search failed to render")
+        st.info("🔎 Player search is unavailable right now.")
 
     st.divider()
-    render_meme_stats(meme_stats)
+    try:
+        render_meme_stats(meme_stats)
+    except Exception:
+        logging.exception("Notable picks failed to render")
+        st.info("🏈 Notable picks are unavailable right now.")
 
     st.divider()
     st.markdown('<div class="section-title">Pool insights</div>',
@@ -264,7 +278,10 @@ def main():
                 st.warning(f"{name} is unavailable right now: {error}")
 
     # Footer with update times
-    render_footer(summary.get("last_updates", {}))
+    try:
+        render_footer(summary.get("last_updates", {}))
+    except Exception:
+        logging.exception("Footer failed to render")
 
 @st.cache_data
 def get_team_color_map():
