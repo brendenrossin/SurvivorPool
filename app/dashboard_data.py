@@ -3,10 +3,13 @@ Data fetching functions for Streamlit dashboard
 """
 
 import json
+import logging
 import streamlit as st
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from app.meme_cards import dumbness_score
+from app.odds_helpers import get_team_name_to_abbr_mapping
+from app.pick_scoring import (rank_dumbest_picks, shape_dumbest_pick,
+                              unmapped_favourite_names)
 from app.week_resolution import week_is_final
 
 try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
@@ -30,45 +33,6 @@ def load_team_data() -> Dict:
     with open("db/seed_team_map.json", "r") as f:
         return json.load(f)
 
-
-@st.cache_data(ttl=3600)
-def team_abbreviations_by_name() -> Dict[str, str]:
-    """{"Los Angeles Chargers": "LAC", ...}
-
-    `games.favorite_team` stores a full team name while `picks.team_abbr` stores
-    an abbreviation, so anything comparing the two has to bridge them. The seed
-    map already carries both, which is better than the hand-written 32-way SQL
-    CASE that does this elsewhere in this file - that one has to be edited every
-    time a franchise moves or renames.
-    """
-    return {
-        team["name"]: abbr
-        for abbr, team in load_team_data()["teams"].items()
-        if team.get("name")
-    }
-
-
-def rank_dumbest_picks(picks, limit=5):
-    """Order losing picks worst-first and keep the top `limit`.
-
-    Pure, so the ranking can be tested without a database - the point of moving
-    it out of the query's ORDER BY. Ties break on entrants eliminated and then
-    raw margin, so the order is stable between runs rather than left to the
-    database's row order.
-    """
-    scored = sorted(
-        picks,
-        key=lambda p: (
-            dumbness_score(
-                p["margin"], p["point_spread"], p["was_favorite"],
-                p["eliminated_count"],
-            ),
-            p["eliminated_count"],
-            p["margin"],
-        ),
-        reverse=True,
-    )
-    return scored[:limit]
 
 def _season_player_ids(db, season):
     """Subquery of player_ids who made at least one pick in the given season.
@@ -289,31 +253,25 @@ def get_meme_stats(season: int) -> Dict:
                 AND pr.survived = FALSE
                 AND g.home_score IS NOT NULL
                 AND g.away_score IS NOT NULL
+                -- Nobody survives a tie (jobs/update_scores.py), so both teams
+                -- arrive here with survived=FALSE and a margin of 0. Under the
+                -- old ORDER BY margin DESC those sank; the score's floor would
+                -- now let a well-picked tie into the top five as "0 point loss".
+                AND g.home_score != g.away_score
             GROUP BY pi.week, pi.team_abbr, g.home_team, g.away_team,
                      g.home_score, g.away_score, g.point_spread, g.favorite_team
         """)
 
         dumbest_results = db.execute(dumbest_query, {"season": season}).fetchall()
-        name_to_abbr = team_abbreviations_by_name()
-
-        dumbest_picks = []
-        for row in dumbest_results:
-            opponent = row.away_team if row.team_abbr == row.home_team else row.home_team
-            favourite = name_to_abbr.get(row.favorite_team, row.favorite_team)
-            was_favorite = (
-                row.favorite_team is not None and favourite == row.team_abbr
-            )
-            dumbest_picks.append({
-                "week": row.week,
-                "team": row.team_abbr,
-                "opponent": opponent,
-                "margin": row.margin,
-                "eliminated_count": row.eliminated_count,
-                "point_spread": row.point_spread,
-                "was_favorite": was_favorite,
-            })
-
-        dumbest_picks = rank_dumbest_picks(dumbest_picks)
+        name_to_abbr = get_team_name_to_abbr_mapping()
+        unmapped = unmapped_favourite_names(dumbest_results, name_to_abbr)
+        if unmapped:
+            logging.warning(
+                "favorite_team values the team map does not know, so these "
+                "picks rank as underdogs: %s", ", ".join(unmapped))
+        dumbest_picks = rank_dumbest_picks([
+            shape_dumbest_pick(row, name_to_abbr) for row in dumbest_results
+        ])
 
         # Big balls picks (underdog wins - teams that were underdogs and won) - grouped by team
         big_balls_query = text("""
