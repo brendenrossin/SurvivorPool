@@ -7,6 +7,7 @@ no-emoji rule - are testable without a Streamlit runtime.
 """
 
 import html
+import math
 
 import streamlit as st
 
@@ -15,8 +16,39 @@ from app.theme import BORDER, INK, INK_MUTED
 MAX_CARDS = 5
 
 
+def _favourite_badge(pick):
+    """`10-PT FAVORITE` when the market had the picked team winning.
+
+    Only for favourites: labelling a 3-point underdog is noise, and the whole
+    point of the badge is to explain why a 12-point loss outranks a 21-point
+    one.
+
+    Defensive about the value itself because it is a `Float` column fed by an
+    external odds feed and rendered straight onto a public page. A string
+    reached `int()` and raised; NaN and infinity are not integers, so they fell
+    through to `f"{spread}-PT FAVORITE"` and printed as "nan-PT FAVORITE". A
+    negative spread means the feed disagrees with itself about who was favoured
+    and is dropped rather than shown as "-3-PT FAVORITE".
+    """
+    if not pick.get("was_favorite"):
+        return []
+    try:
+        spread = float(pick.get("point_spread") or 0)
+    except (TypeError, ValueError):
+        return []
+    if not math.isfinite(spread) or spread <= 0:
+        return []
+    points = int(spread) if spread.is_integer() else spread
+    return [f"{points}-PT FAVORITE"]
+
+
 def dumbest_card_rows(picks):
-    """Shape the worst beatings for display, worst first."""
+    """Shape the worst beatings for display, worst first.
+
+    Order is decided by the caller - `dumbness_score` - not here. The score
+    itself is deliberately never shown: "2596" means nothing on a card, while
+    the two numbers it is built from mean everything.
+    """
     rows = []
     for rank, pick in enumerate(picks[:MAX_CARDS], start=1):
         count = pick["eliminated_count"]
@@ -27,7 +59,7 @@ def dumbest_card_rows(picks):
             "matchup": f"{pick['team']} vs {pick['opponent']}",
             "week": f"Week {pick['week']}",
             "detail": f"{count} player{'' if count == 1 else 's'} eliminated",
-            "badges": [],
+            "badges": _favourite_badge(pick),
         })
     return rows
 
