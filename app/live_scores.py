@@ -19,6 +19,7 @@ import streamlit as st
 from app.dashboard_data import get_week_scoreboard, load_team_data
 from app.theme import INK_MUTED, SURFACE, contrast_fill
 from app.odds_helpers import format_pregame_line
+from app.week_resolution import resolve_scoreboard_week  # noqa: F401
 
 CARDS_PER_ROW = 4
 
@@ -31,28 +32,6 @@ PACIFIC = pytz.timezone("America/Los_Angeles")
 # exist, the filter has already dropped the games nobody picked; otherwise no
 # card carries picks at all. A tiebreak on it could never discriminate.
 STATUS_ORDER = {"in": 0, "pre": 1, "final": 2}
-
-
-def resolve_scoreboard_week(
-    current_week: int, week_statuses: Dict[int, List[str]]
-) -> int:
-    """The week the scoreboard should show.
-
-    Deliberately NOT the grid's `resolve_current_week`. The grid leads with the
-    last week that kicked off, because that is the last week whose picks may be
-    published. The scoreboard rolls forward once a week is finished, so Tuesday
-    shows the upcoming slate rather than a settled one.
-
-    The roll is driven by whether the games actually finished. The rule this
-    replaces added a week every Tuesday after 04:00 UTC whether or not anything
-    had been played, on top of a base week derived as max(Game.week) - which in
-    2025 is week 16, a week nobody played, because the NFL schedule outruns the
-    pool.
-    """
-    statuses = week_statuses.get(current_week)
-    if not statuses or not all(status == "final" for status in statuses):
-        return current_week
-    return current_week + 1 if (current_week + 1) in week_statuses else current_week
 
 
 # This pool's picks are already public before kickoff by its own process:

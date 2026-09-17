@@ -47,9 +47,11 @@ from app.picks_grid import (
     eliminated_fill,
     mute_color,
     resolve_current_week,
+    resolve_grid_week,
     select_grid_rows,
 )
 from app.attrition import build_sparkline, describe_worst_stretch
+from app.week_resolution import week_is_final
 from app.meme_cards import render_meme_stats
 from app.theme import GLOBAL_CSS, SURFACE
 from app.live_scores import (
@@ -213,8 +215,16 @@ def main():
             "big_balls_picks": []
         }
 
-    # Main dashboard layout - Weekly picks chart as main focus
-    render_weekly_picks_chart(summary)
+    # Main dashboard layout - Weekly picks chart as main focus.
+    # Guarded like every other section: this function reads the database, and
+    # it was the only major block whose exception reached Streamlit's script
+    # runner - which renders the traceback, and psycopg2's connection errors
+    # carry the production host and user. Same reason as the live-scores block.
+    try:
+        render_weekly_picks_chart(summary)
+    except Exception:
+        logging.exception("Weekly picks grid failed to render")
+        st.info("📊 The picks grid is unavailable right now.")
 
     st.divider()
 
@@ -275,24 +285,35 @@ def render_weekly_picks_chart(summary):
         st.info("📊 **No weekly picks data yet**\n\nPicks will appear once:\n1. Google Sheets data is imported (hourly cron)\n2. NFL scores are fetched (Sunday/Monday/Thursday cron)\n3. Picks are linked to games and processed")
         return
 
-    pick_weeks = sorted(w["week"] for w in summary["weeks"])
+    # The roll gates on weeks the grid can actually draw, not on weeks that
+    # merely have rows in `picks`. Auto-elimination writes team_abbr=NULL picks
+    # for players who missed a week; those contribute nothing to the grid, so a
+    # week holding only those would roll the column and then render it empty.
+    drawable_weeks = sorted(w["week"] for w in summary["weeks"] if w["teams"])
 
     # The sheet holds picks for unplayed weeks, so the latest week with a pick
-    # is not "now" - resolve against the weeks whose games have actually
-    # started, and never aggregate past that or we leak next week's picks.
-    current_week = resolve_current_week(pick_weeks, get_started_game_weeks(SEASON))
-    weeks = list(range(1, current_week + 1))  # spec: columns are 1..current_week
+    # is not "now": resolve against the weeks whose games have actually
+    # started, then roll forward once that week is settled and the next one has
+    # picks. Without the roll the grid stayed on a finished week until Thursday
+    # while the scoreboard had already moved on - see resolve_grid_week.
+    current_week = resolve_grid_week(
+        drawable_weeks,
+        get_started_game_weeks(SEASON),
+        get_week_game_statuses(SEASON),
+    )
+    weeks = list(range(1, current_week + 1))  # spec: columns are 1..display_week
 
     counts, week_totals, season_totals = aggregate_picks(
         summary["weeks"], current_week
     )
     if not counts:
-        # Reachable when the sheet holds only future weeks: aggregate_picks
-        # clips at the current week, so picks exist but none are publishable.
+        # Reachable when the sheet holds only weeks later than the one on
+        # display: aggregate_picks clips at the current week, so picks exist
+        # but none are publishable yet.
         st.info(
             f"**No picks for week {current_week} or earlier.** The sheet is "
-            "filled in ahead of kickoff, so picks appear here once their "
-            "games start."
+            "filled in ahead of kickoff, so picks appear here once their week "
+            "is the one on display."
         )
         return
 
@@ -317,6 +338,19 @@ def render_weekly_picks_chart(summary):
 
     week_counts = {t: n for (w, t), n in counts.items() if w == current_week}
     rows = select_grid_rows(week_counts, season_totals, expanded=expanded)
+
+    # The grid now leads with a week before it kicks off, so the newest column
+    # can be mid-aggregation: the manager copies GroupMe into the sheet over
+    # hours. Say how complete it is, or a 7-of-179 column reads as the finished
+    # picture - and it is that sample that decides the whole grid's row order.
+    if not week_is_final(get_week_game_statuses(SEASON).get(current_week)):
+        drawn = week_totals.get(current_week, 0)
+        alive = summary.get("entrants_remaining", 0)
+        if alive and drawn < alive:
+            st.caption(
+                f"Week {current_week} is still being filled in - "
+                f"{drawn:,} of {alive:,} surviving entrants have a pick in so far."
+            )
 
     # Cached: the grid's two controls make every toggle a full script rerun.
     team_status = get_week_team_status(SEASON, current_week)
@@ -356,16 +390,23 @@ def render_weekly_picks_chart(summary):
     sample = get_team_color_map().get(rows[0], "#666666")
     lifted = contrast_fill(sample, SURFACE, EMPHASIS_MIN_CONTRAST)
     out_fill = eliminated_fill(sample, SURFACE)
-    st.caption(
+    legend = (
         f'<span style="background:{lifted};{swatch}"></span> this week'
         ' &nbsp;·&nbsp; '
         f'<span style="background:{mute_color(sample, SURFACE)};{swatch}"></span>'
         ' earlier weeks'
-        ' &nbsp;·&nbsp; '
-        f'<span style="background:{out_fill};border:2px solid '
-        f'{eliminated_edge(out_fill)};{swatch}"></span> eliminated this week',
-        unsafe_allow_html=True,
     )
+    # The third swatch is only meaningful once something has actually lost. The
+    # grid now leads with an unplayed week for three days of every week, and on
+    # such a week every team is "pending" - advertising an encoding that cannot
+    # appear is worse than a shorter legend.
+    if any(status == "lost" for status in team_status.values()):
+        legend += (
+            ' &nbsp;·&nbsp; '
+            f'<span style="background:{out_fill};border:2px solid '
+            f'{eliminated_edge(out_fill)};{swatch}"></span> eliminated this week'
+        )
+    st.caption(legend, unsafe_allow_html=True)
 
     eliminated = sorted(
         team for team in rows

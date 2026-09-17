@@ -16,6 +16,15 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import plotly.graph_objects as go
 
+# Re-exported: week resolution moved to its own module so the grid and the
+# scoreboard cannot drift apart again. Kept importable from here because the
+# spec and the tests name this module.
+from app.week_resolution import (  # noqa: F401
+    resolve_current_week,
+    resolve_display_week,
+    resolve_grid_week,
+)
+
 # Cell geometry, in data coordinates (1.0 = one grid step)
 CELL_W, CELL_H = 0.92, 0.82
 ROW_PX = 34          # vertical space per team row
@@ -96,40 +105,6 @@ def aggregate_picks(
             season_totals[team] = season_totals.get(team, 0) + count
 
     return counts, week_totals, season_totals
-
-
-def resolve_current_week(
-    pick_weeks: Iterable[int], started_game_weeks: Iterable[int]
-) -> int:
-    """The week the grid should lead with.
-
-    Picks are entered in the sheet weeks ahead of kickoff, so the latest week
-    holding a pick is not "now". The current week is the latest week whose games
-    have actually started, clamped to the weeks that have picks (the NFL
-    schedule runs past the pool's final week).
-
-    Args:
-        pick_weeks: every week with at least one pick
-        started_game_weeks: every week with at least one game underway or final
-
-    Returns:
-        The week to draw in full colour; 1 before the season starts.
-    """
-    pick_weeks = list(pick_weeks)
-    started = list(started_game_weeks)
-
-    if not pick_weeks:
-        return 1
-    if not started:
-        return min(pick_weeks)
-
-    # The latest week that has picks *and* has kicked off. Taking
-    # min(max(started), max(pick_weeks)) instead would return a week that has no
-    # picks whenever the pick weeks have a gap - the grid would then bold a
-    # column that isn't drawn and lead with no full-colour cell at all.
-    kicked_off = max(started)
-    eligible = [w for w in pick_weeks if w <= kicked_off]
-    return max(eligible) if eligible else min(pick_weeks)
 
 
 def _channels(hex_color: str) -> Tuple[int, int, int]:

@@ -2,7 +2,16 @@
 echo "🚀 Starting app with PORT=$PORT"
 echo "📝 Environment check:"
 echo "  PORT: $PORT"
-echo "  DATABASE_URL: ${DATABASE_URL:0:30}..."
+# Never echo the URL itself. At 30 characters this printed past
+# "postgresql://postgres:" and into the first characters of the password, on
+# every container boot, straight into Railway's deploy logs. The host is the
+# part actually worth logging: production and staging have separate databases
+# and pointing at the wrong one is the mistake this line exists to catch.
+if [ -n "$DATABASE_URL" ]; then
+    echo "  DATABASE host: ${DATABASE_URL##*@}"
+else
+    echo "  DATABASE_URL: (not set)"
+fi
 
 # Initialize database first
 echo "🗄️ Initializing database..."
@@ -116,9 +125,18 @@ print('✅ Full score update completed on startup')
 
 echo "🚀 All data processing complete, starting Streamlit..."
 
+# --client.showErrorDetails=none: Streamlit 1.50 defaults to "full", which
+# renders an uncaught exception's type, message and traceback in the browser.
+# psycopg2 puts the database host and user in the message, so a dropped
+# connection would publish them to every pool member. Every render path in
+# app/main.py is individually guarded and logs to stderr, so nothing is lost
+# here that Railway's logs do not keep - this is the backstop for the next
+# path someone adds. Set on the server, not in .streamlit/config.toml, so a
+# local `streamlit run` still shows full tracebacks while developing.
 exec streamlit run app/main.py \
     --server.port=$PORT \
     --server.address=0.0.0.0 \
     --server.headless=true \
     --server.enableCORS=false \
-    --server.enableXsrfProtection=false
+    --server.enableXsrfProtection=false \
+    --client.showErrorDetails=none
