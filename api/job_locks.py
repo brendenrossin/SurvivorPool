@@ -63,14 +63,15 @@ def advisory_lock(db: Session, lock_id: int, timeout_seconds: int = 300):
     connection that took it, and only that connection can release it. `db`
     cannot offer that guarantee, because callers commit inside this block -
     jobs/groupme_shared.store_in_batches commits once per batch - and a commit
-    returns the connection to the pool. api/database.py creates the engine with
-    no pool arguments, so that is SQLAlchemy's default QueuePool holding five
-    connections, not one. A single-threaded job checking back out of an idle
-    pool will usually get the same connection, which is why this worked; it was
-    luck, not mutual exclusion. Land a later batch on a different connection and
-    two jobs run concurrently while believing they hold the lock, and the
-    unlock returns false, stranding the lock on the original connection until
-    the pool recycles it - after which every run records "skipped" forever.
+    returns the connection to the pool. api/database.py sets no `pool_size`, so
+    that is SQLAlchemy's default QueuePool holding five connections, not one. A
+    single-threaded job checking back out of an idle pool will usually get the
+    same connection, which is why this worked; it was luck, not mutual
+    exclusion. Land a later batch on a different connection and two jobs run
+    concurrently while believing they hold the lock, and the unlock returns
+    false, stranding the lock on the original connection until the pool
+    recycles it - bounded at `pool_recycle`, 30 minutes, but every run in that
+    window records "skipped".
 
     A dedicated connection makes the invariant structural: the connection that
     acquires the lock is the connection that releases it, and it is never

@@ -70,10 +70,8 @@ the merge is clean.
 
 ## Still open
 
-- **`create_engine(DATABASE_URL, pool_pre_ping=True)`** in `api/database.py`.
-  Railway's Postgres proxy drops idle connections and there is no `pool_pre_ping`
-  or `pool_recycle`, so the first query on a stale pooled connection raises
-  `OperationalError`. This is the most common trigger for the guarded render
-  paths, and the one remaining piece of that finding. Left out here because it
-  changes connection behaviour for every job and page, which deserves its own
-  change rather than riding along with a chart fix.
+- ~~`create_engine(DATABASE_URL, pool_pre_ping=True)`~~ **Done** on
+  `chore/db-pool-pre-ping`, with `pool_recycle=1800` alongside it. Verified by
+  killing a pooled connection server-side with `pg_terminate_backend` and
+  re-querying: the old configuration raises `OperationalError`, the new one
+  recovers on a fresh backend.
