@@ -31,7 +31,9 @@ A **team × week grid** that leads with the current week.
 - **Rows** are teams, `max(10, teams picked this week)`, no upper cap.
 - **Row order** is this week's pick count descending, then season total descending,
   then alphabetical. Rows beyond the current week's teams are filled by season total.
-- **Columns** are weeks `1..current_week`. Future weeks are not shown.
+- **Columns** are weeks `1..display_week`. Weeks beyond that are not shown.
+  See *Amendment 2026-09-17* — the newest column may be a week that has not
+  kicked off yet.
 - **The current week's cells** carry the team colour, lifted where it does not
   clear 3:1 against the surface (see *Amendment: the emphasis lift* below).
 - **Earlier weeks** carry a muted version of the team colour — blended 26% toward
@@ -94,7 +96,7 @@ win/loss itself. See `docs/design/scores-and-grid-spec.md`.
 |---|---|---|
 | History style | **Muted team colour** | Keeps a team's run traceable across the row. Greyscale was the alternative — it would also encode magnitude by tone, but spends the emphasis contrast that makes the current week pop. |
 | Number format | **Raw count**, `%` optional | Count is concrete ("14 people took DEN"). `%` stays available because the pool shrinks 252 → 19, which makes raw counts incomparable across weeks. |
-| Future weeks | **Hidden** | The sheet holds picks for unplayed weeks from day one. Showing them would leak next week's picks. |
+| Future weeks | **One week ahead, once the current week is settled** | Superseded — see *Amendment 2026-09-17*. The leak premise no longer holds for this pool. Weeks beyond that stay hidden. |
 | Row cap | **None** | Realistically ≤16 teams in a week, usually far fewer. |
 | Colour job | Identity, not magnitude | Follows from using team colours; forces the number into every cell. |
 | Busted current-week pick | Desaturated fill, danger border | Mutes on *saturation*, so it cannot be read as history, which mutes on lightness. See `docs/design/scores-and-grid-spec.md`. |
@@ -133,6 +135,53 @@ min(latest week with a started game, latest week with picks)
 
 falling back to week 1 before the season starts. The NFL schedule runs past the
 pool's final week, which is why it clamps.
+
+**Then it rolls** — see *Amendment 2026-09-17* below. All three rules now live in
+`app/week_resolution.py`, not in `picks_grid.py` and `live_scores.py` separately.
+
+### Amendment 2026-09-17: the grid rolls on picks, not on kickoff
+
+**This spec's column rule changed.** Columns are `1..display_week`, where
+`display_week` is `resolve_current_week` rolled forward to the next week holding
+picks, once the current week's games are all final and every scheduled week in
+between is finished too (`resolve_display_week`, composed by `resolve_grid_week`,
+both in `app/week_resolution.py`). The newest column may therefore be a week that
+has not kicked off.
+
+**Why.** The scoreboard rolls on `resolve_scoreboard_week` the moment a week goes
+final; the grid stopped at the last week that *kicked off*. From Monday night to
+Thursday evening the two halves of the same page named different weeks. That is
+the bug this amendment fixes, and it is why the three resolvers were moved into
+one module — each previously owned a private copy of "is this week over?", and
+`dashboard_data.py` held a third.
+
+**This publishes picks ahead of their games, deliberately.** The decision table's
+old "Future weeks: Hidden — showing them would leak next week's picks" does not
+hold for this pool: entrants post picks to a GroupMe where everyone sees them and
+the manager aggregates them into the sheet afterwards, so a pick in the database
+has been public for hours. Same ruling as `PICKS_ARE_PUBLIC` in
+`app/live_scores.py`. See `docs/pool-process.md`.
+
+**For a pool that collects picks privately this reverts with one constant.**
+`resolve_display_week` takes `picks_are_public` for exactly that reason: set it
+False and the grid stops leading with an unplayed week, the same way
+`should_reveal_picks` restores the scoreboard's gate. A half-covered kill switch
+was the review finding that put the parameter there.
+
+**What is still hidden:** weeks beyond `display_week`. The sheet holds every
+week's picks from day one; the roll advances to one further week, and only past a
+settled one. It is not a licence to show the whole sheet.
+
+**Accepted cost, owner-approved:** the roll fires on the *first* pick of the new
+week, so between the manager starting and finishing the GroupMe aggregation the
+lead column is real but thin — on 2026-09-17 it was 7 picks against 179 survivors,
+and the row order of the whole grid is decided by that sample. A quorum threshold
+(roll only past 25% of the field) was considered and declined: a grid a few days
+behind the scoreboard was the bug being fixed. The lead column is captioned with
+its own completeness so a partial week cannot be misread as a final one.
+
+**This supersedes "Known, accepted: the pre-season reveal"** below — rendering an
+unplayed week is now a general rule, not a flagged exception to a stricter one.
 
 ---
 
@@ -249,8 +298,9 @@ history; it is exercised properly by 2025.
   with the season-rollover work. The grid's own tests are pure functions and need
   no fixtures.
 - The design is **settled**. Don't reopen it: muted team colour for history, raw
-  count by default with a `%` toggle, stop at the current week, no row cap, and an
-  expand toggle for every team picked so far. Build what the spec says.
+  count by default with a `%` toggle, stop at the display week (see *Amendment
+  2026-09-17*), no row cap, and an expand toggle for every team picked so far.
+  Build what the spec says.
 
 ### Testing against real data, post-rollover
 

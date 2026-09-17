@@ -19,6 +19,61 @@ _WASH_FAINT = "rgba(245,158,11,0.10)"
 
 WORST_STRETCH_SPAN = 3
 
+# The curve opens on the field before a single game was played. That is not a
+# week - there is no week 0 - so it is drawn one step before the first plotted
+# week and labelled rather than numbered.
+ANCHOR_LABEL = "Start"
+
+MARKER_PX = 7
+# A size smaller: the anchor is where the field started, not a week anyone
+# survived. The relationship is the point, so it is derived, not repeated.
+ANCHOR_MARKER_PX = MARKER_PX - 1
+
+
+def _anchor_x(rows):
+    """Where the opening point sits on the week axis.
+
+    One step before the first *plotted* week, not a hard 0. The series holds
+    only weeks that have kicked off, so when the pool's first played week is
+    not week 1 a fixed 0 stretches the opening segment across weeks that never
+    happened and implies the field held flat through them.
+    """
+    return rows[0]["week"] - 1
+
+
+def _series_xy(rows):
+    """x and y for the curve, including the opening anchor.
+
+    The anchor is `rows[0]["entering"]`: the field at the start of the first
+    played week, which - because `build_attrition_rows` sets `entering` before
+    its first subtraction - is always the number everyone entered with, whether
+    or not week 1 is in the series.
+
+    Two things go wrong without it. A season one week old is a single point, and
+    `mode="lines"` draws a one-point line as nothing at all - the KPI sparkline
+    rendered an empty 44px box for the whole of week 1, which is what surfaced
+    this. And the first and largest drop of the season, 300 to 179 in 2026,
+    never appears: the curve starts at the survivors and the field it came from
+    is only ever a caption.
+    """
+    if not rows:
+        return [], []
+    xs = [_anchor_x(rows)] + [r["week"] for r in rows]
+    ys = [rows[0]["entering"]] + [r["remaining"] for r in rows]
+    return xs, ys
+
+
+def _series_hover(rows):
+    """Hover text per point, anchor first. Only the full chart uses it - the
+    sparkline sets hoverinfo="skip", so it never builds these strings."""
+    if not rows:
+        return []
+    return [f"{ANCHOR_LABEL}<br>{rows[0]['entering']:,} entered"] + [
+        f"Week {r['week']}<br>{r['remaining']:,} still alive<br>"
+        f"{r['eliminated']:,} out ({r['pct_out']}%)"
+        for r in rows
+    ]
+
 
 def build_sparkline(rows):
     """A tiny remaining-players trace for the KPI card. No axes, no labels."""
@@ -26,9 +81,10 @@ def build_sparkline(rows):
     if not rows:
         return fig
 
+    xs, ys = _series_xy(rows)
     fig.add_trace(go.Scatter(
-        x=[r["week"] for r in rows],
-        y=[r["remaining"] for r in rows],
+        x=xs,
+        y=ys,
         mode="lines",
         line=dict(color=ACCENT, width=2, shape="spline", smoothing=0.5),
         fill="tozeroy",
@@ -54,19 +110,21 @@ def build_attrition_chart(rows, current_week=None):
         return fig
 
     weeks = [r["week"] for r in rows]
+    anchor_x = _anchor_x(rows)
+    xs, ys = _series_xy(rows)
     fig.add_trace(go.Scatter(
-        x=weeks,
-        y=[r["remaining"] for r in rows],
+        x=xs,
+        y=ys,
         mode="lines+markers",
         line=dict(color=ACCENT, width=3),
-        marker=dict(size=7, color=ACCENT),
+        marker=dict(
+            size=[ANCHOR_MARKER_PX] + [MARKER_PX] * len(rows),
+            color=[INK_MUTED] + [ACCENT] * len(rows),
+        ),
         fill="tozeroy",
         fillcolor=_WASH_FAINT,
-        customdata=[[r["eliminated"], r["pct_out"]] for r in rows],
-        hovertemplate=(
-            "Week %{x}<br>%{y} still alive<br>"
-            "%{customdata[0]} out (%{customdata[1]}%)<extra></extra>"
-        ),
+        hovertext=_series_hover(rows),
+        hovertemplate="%{hovertext}<extra></extra>",
     ))
 
     if current_week is not None and current_week in weeks:
@@ -79,8 +137,15 @@ def build_attrition_chart(rows, current_week=None):
         height=280,
         margin=dict(l=8, r=8, t=8, b=28),
         font=dict(family=FONT_STACK, size=12, color=INK),
+        # Explicit ticks rather than dtick=1, so the opening point reads
+        # "Start" instead of naming a week that does not exist. Week labels stay
+        # bare numbers: tickmode="array" disables Plotly's auto-thinning, so a
+        # full 18-week season draws 19 labels and this is a 280px chart on a
+        # mobile-first dashboard. "Start" already disambiguates the axis.
         xaxis=dict(title=None, tickfont=dict(color=INK_MUTED, size=11),
-                   gridcolor=BORDER, dtick=1),
+                   gridcolor=BORDER, tickmode="array",
+                   tickvals=[anchor_x] + weeks,
+                   ticktext=[ANCHOR_LABEL] + [str(w) for w in weeks]),
         yaxis=dict(title=None, tickfont=dict(color=INK_MUTED, size=11),
                    gridcolor=BORDER, rangemode="tozero"),
         paper_bgcolor="rgba(0,0,0,0)",
