@@ -37,14 +37,32 @@ and the pre-kickoff protections come back intact, with their tests
 (`TestShouldRevealPicks` in `tests/test_live_scores.py`, which pass the flag
 explicitly for that reason).
 
-### What it does *not* change
+### What it also changed, as of 2026-09-17
 
-The **picks grid** still stops at the last week that kicked off
-(`resolve_current_week` in `app/picks_grid.py`). That clamp is about the sheet
-holding *future* weeks - week 6's picks sitting in the sheet during week 2 -
-which is a different question from whether the current week's picks are public.
-Two different notions of "current week", deliberately not unified. See
-`docs/design/picks-grid-spec.md`.
+The **picks grid** used to stop at the last week that kicked off, on the grounds
+that the sheet holds *future* weeks - week 6's picks sitting in the sheet during
+week 2 - which is a different question from whether the current week's picks are
+public. That distinction still stands, but the clamp was doing more than it
+needed to: it also held the grid on a *settled* week for three days while the
+scoreboard had already rolled, so the two halves of one page named different
+weeks from Monday night to Thursday evening.
+
+The grid now rolls forward one week - to the next week that actually has picks -
+once the current week is final. It publishes that week's picks before kickoff,
+for the same reason the scoreboard does: they have been public in the GroupMe for
+hours already. Weeks beyond that stay hidden; the roll advances by one settled
+week, not to the end of the sheet.
+
+`resolve_current_week`, `resolve_scoreboard_week` and `resolve_display_week` now
+live together in `app/week_resolution.py`. They were in two modules that cannot
+import each other, each with a private copy of "is this week over?", which is how
+they drifted apart in the first place. See `docs/design/picks-grid-spec.md`,
+*Amendment 2026-09-17*.
+
+**The gate is still a single switch.** `resolve_display_week` takes
+`picks_are_public` alongside `should_reveal_picks`, so a pool that collects picks
+privately gets the pre-kickoff protection back on *both* surfaces, not just the
+scoreboard.
 
 ## Multi-league
 

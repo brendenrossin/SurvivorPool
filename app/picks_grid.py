@@ -16,6 +16,15 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import plotly.graph_objects as go
 
+# Re-exported: week resolution moved to its own module so the grid and the
+# scoreboard cannot drift apart again. Kept importable from here because the
+# spec and the tests name this module.
+from app.week_resolution import (  # noqa: F401
+    resolve_current_week,
+    resolve_display_week,
+    resolve_grid_week,
+)
+
 # Cell geometry, in data coordinates (1.0 = one grid step)
 CELL_W, CELL_H = 0.92, 0.82
 ROW_PX = 34          # vertical space per team row
@@ -96,84 +105,6 @@ def aggregate_picks(
             season_totals[team] = season_totals.get(team, 0) + count
 
     return counts, week_totals, season_totals
-
-
-def resolve_current_week(
-    pick_weeks: Iterable[int], started_game_weeks: Iterable[int]
-) -> int:
-    """The week the grid should lead with.
-
-    Picks are entered in the sheet weeks ahead of kickoff, so the latest week
-    holding a pick is not "now". The current week is the latest week whose games
-    have actually started, clamped to the weeks that have picks (the NFL
-    schedule runs past the pool's final week).
-
-    Args:
-        pick_weeks: every week with at least one pick
-        started_game_weeks: every week with at least one game underway or final
-
-    Returns:
-        The week to draw in full colour; 1 before the season starts.
-    """
-    pick_weeks = list(pick_weeks)
-    started = list(started_game_weeks)
-
-    if not pick_weeks:
-        return 1
-    if not started:
-        return min(pick_weeks)
-
-    # The latest week that has picks *and* has kicked off. Taking
-    # min(max(started), max(pick_weeks)) instead would return a week that has no
-    # picks whenever the pick weeks have a gap - the grid would then bold a
-    # column that isn't drawn and lead with no full-colour cell at all.
-    kicked_off = max(started)
-    eligible = [w for w in pick_weeks if w <= kicked_off]
-    return max(eligible) if eligible else min(pick_weeks)
-
-
-def resolve_display_week(current_week, week_statuses, pick_weeks):
-    """Roll `current_week` forward once its games are done and the next week
-    has picks to show.
-
-    `resolve_current_week` stops at the last week that has *kicked off*. That
-    left the grid, the summary and the picks breakdown sitting on a settled
-    week for the whole of Tuesday to Thursday while the scoreboard - which
-    rolls on `resolve_scoreboard_week` - had already moved on. The two halves
-    of the page disagreed about what week it was.
-
-    This is `resolve_scoreboard_week`'s rule with the gate the scoreboard does
-    not need: the scoreboard can show an empty upcoming slate, but a picks grid
-    whose newest column is blank is worse than one a few days behind. So the
-    roll waits for picks, not for kickoff.
-
-    Showing a week before it is played publishes picks ahead of their games.
-    That is deliberate and specific to this pool: picks are posted to a GroupMe
-    where everyone sees them before kickoff, and the manager aggregates them
-    into the sheet afterwards, so by the time a pick is in the database it has
-    been public for hours. See docs/pool-process.md and PICKS_ARE_PUBLIC in
-    app/live_scores.py, which settles the same question for the scoreboard.
-
-    Args:
-        current_week: the week `resolve_current_week` landed on
-        week_statuses: {week: [game status, ...]} for the season
-        pick_weeks: every week with at least one pick
-
-    Returns:
-        `current_week`, or `current_week + 1` when that week is finished and
-        the next one has both picks and a schedule.
-    """
-    statuses = week_statuses.get(current_week)
-    if not statuses or not all(status == "final" for status in statuses):
-        return current_week
-
-    following = current_week + 1
-    # Both gates matter. Without picks the grid leads with an empty column;
-    # without a schedule it can roll off the end of the season, because the
-    # sheet outlives the fixture list.
-    if following in set(pick_weeks) and following in week_statuses:
-        return following
-    return current_week
 
 
 def _channels(hex_color: str) -> Tuple[int, int, int]:

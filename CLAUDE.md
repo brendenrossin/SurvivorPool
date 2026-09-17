@@ -411,9 +411,12 @@ scoreboard filters to picked teams before a week starts. Read
 treated as one once, correctly, until the process was known. The gate is kept
 for a pool that collects picks privately.
 
-It does **not** license showing *future* weeks. The picks grid still stops at
-the last week that kicked off, because the sheet holds later weeks' picks from
-day one - a different question. See `docs/design/picks-grid-spec.md`.
+It does **not** license showing the whole sheet. Since 2026-09-17 the picks grid
+rolls forward **one** week - to the next week holding picks - once the current
+week's games are all final, so the lead column is often a week that has not
+kicked off. Weeks beyond that stay hidden, because the sheet holds every week's
+picks from day one. The three week resolvers live in `app/week_resolution.py`;
+see `docs/design/picks-grid-spec.md`, *Amendment 2026-09-17*.
 
 ## 🎯 MVP vs Future Features
 

@@ -6,6 +6,8 @@ import json
 import streamlit as st
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.week_resolution import week_is_final
+
 try:  # 3.8+ in stdlib; the Dockerfile pins 3.11
     from typing import TypedDict
 except ImportError:  # pragma: no cover
@@ -97,26 +99,21 @@ def count_completed_weeks(week_statuses: Dict[int, List[str]]) -> int:
     """
     return sum(
         1 for statuses in week_statuses.values()
-        if statuses and all(status == "final" for status in statuses)
+        if week_is_final(statuses)
     )
 
 
 @st.cache_data(ttl=60)
 def get_completed_week_count(season: int) -> int:
-    """Number of survival rounds actually played out this season."""
-    SessionFactory = get_db_session()
-    db = SessionFactory()
-    try:
-        rows = db.query(Game.week, Game.status).filter(Game.season == season).all()
-        by_week: Dict[int, List[str]] = {}
-        for week, status in rows:
-            by_week.setdefault(week, []).append(status)
-        return count_completed_weeks(by_week)
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+    """Number of survival rounds actually played out this season.
+
+    Derived from `get_week_game_statuses` rather than re-running its query. The
+    two used to issue the byte-identical select into two independent 60s caches,
+    which could be populated a minute apart - so the "Weeks completed" KPI could
+    read 1 while the grid, driven off the other cache, had already rolled to
+    week 2.
+    """
+    return count_completed_weeks(get_week_game_statuses(season))
 
 
 @st.cache_data(ttl=60)  # 60 second cache - refresh during live windows

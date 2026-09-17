@@ -26,6 +26,7 @@ from app.picks_grid import (
     relative_luminance,
     resolve_current_week,
     resolve_display_week,
+    resolve_grid_week,
     select_grid_rows,
 )
 
@@ -183,23 +184,71 @@ class TestResolveDisplayWeek:
             1, {1: self.FINISHED, 2: self.UNPLAYED}, pick_weeks=[1]
         ) == 1
 
-    def test_holds_when_the_next_week_has_no_schedule(self):
-        """The sheet outlives the fixture list - picks must not roll the grid
-        off the end of the season."""
-        assert resolve_display_week(
-            18, {18: self.FINISHED}, pick_weeks=[18, 19]
-        ) == 18
-
     def test_holds_when_the_week_has_no_games_at_all(self):
         assert resolve_display_week(1, {}, pick_weeks=[1, 2]) == 1
 
-    def test_rolls_one_week_at_a_time(self):
-        """resolve_current_week already lands on the last kicked-off week, so
-        a single step is the whole distance."""
+    def test_holds_when_the_week_has_games_but_no_statuses(self):
+        """A present-but-empty list is a different database state from a
+        missing key, and only one of them was covered."""
+        assert resolve_display_week(
+            1, {1: [], 2: ["pre"]}, pick_weeks=[1, 2]
+        ) == 1
+
+    def test_skips_a_gap_in_the_pick_weeks(self):
+        """The pool skips weeks. Stepping blindly to current_week + 1 landed on
+        a week with nothing to draw, so the grid held while the scoreboard
+        rolled - the exact disagreement this function removes."""
         assert resolve_display_week(
             1, {1: self.FINISHED, 2: self.FINISHED, 3: self.UNPLAYED},
-            pick_weeks=[1, 2, 3],
+            pick_weeks=[1, 3],
+        ) == 3
+
+    def test_will_not_jump_over_a_week_still_being_played(self):
+        """Gap or no gap, an unfinished week in between stops the roll."""
+        assert resolve_display_week(
+            1, {1: self.FINISHED, 2: self.UNDERWAY, 3: self.UNPLAYED},
+            pick_weeks=[1, 3],
+        ) == 1
+
+    def test_a_private_pool_never_leads_with_an_unplayed_week(self):
+        """PICKS_ARE_PUBLIC is a kill switch; it has to reach both surfaces."""
+        assert resolve_display_week(
+            1, {1: self.FINISHED, 2: self.UNPLAYED}, pick_weeks=[1, 2],
+            picks_are_public=False,
+        ) == 1
+
+
+class TestResolveGridWeek:
+    """The composition, which is the part that can be silently deleted - the
+    spec records the same lesson from the future-week clamp."""
+
+    FINISHED = ["final"] * 16
+    UNPLAYED = ["pre"] * 16
+
+    def test_rolls_past_a_settled_week(self):
+        assert resolve_grid_week(
+            pick_weeks=[1, 2], started_game_weeks=[1],
+            week_statuses={1: self.FINISHED, 2: self.UNPLAYED},
         ) == 2
+
+    def test_holds_at_the_end_of_the_pool_though_the_schedule_runs_on(self):
+        """2025: the pool ends at week 14, the NFL schedule reaches 16. The
+        pick gate is what stops the roll here - the schedule gate cannot."""
+        assert resolve_grid_week(
+            pick_weeks=list(range(1, 15)),
+            started_game_weeks=list(range(1, 15)),
+            week_statuses={w: self.FINISHED for w in range(1, 15)}
+                          | {15: self.UNPLAYED, 16: self.UNPLAYED},
+        ) == 14
+
+    def test_before_any_kickoff_it_leads_with_the_first_week_with_picks(self):
+        assert resolve_grid_week(
+            pick_weeks=[1, 2], started_game_weeks=[],
+            week_statuses={1: self.UNPLAYED, 2: self.UNPLAYED},
+        ) == 1
+
+    def test_no_picks_at_all(self):
+        assert resolve_grid_week([], [], {}) == 1
 
 
 class TestFigureLayout:

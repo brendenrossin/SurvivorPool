@@ -63,11 +63,27 @@ class TestAttritionChart:
 
     def test_labels_the_anchor_rather_than_naming_a_week_zero(self):
         axis = build_attrition_chart(ROWS).layout.xaxis
-        assert axis.ticktext == (ANCHOR_LABEL, "W1", "W2", "W3", "W4", "W5")
+        assert axis.ticktext == (ANCHOR_LABEL, "1", "2", "3", "4", "5")
         assert axis.tickvals == (0, 1, 2, 3, 4, 5)
 
     def test_anchor_hover_names_the_field_that_entered(self):
         assert "252 entered" in build_attrition_chart(ROWS).data[0].hovertext[0]
+
+    def test_anchor_sits_one_step_before_the_first_played_week(self):
+        """A pool whose first played week is week 2 must not stretch the
+        opening segment back to a hard x=0."""
+        late = [{"week": 2, "entering": 300, "eliminated": 50,
+                 "remaining": 250, "pct_out": 16.7}]
+        fig = build_attrition_chart(late)
+        assert list(fig.data[0].x) == [1, 2]
+        assert fig.layout.xaxis.ticktext == (ANCHOR_LABEL, "2")
+
+    def test_every_point_is_styled(self):
+        """The marker arrays must stay exactly as long as the data, or a point
+        silently loses its styling."""
+        fig = build_attrition_chart(ROWS)
+        assert len(fig.data[0].marker.size) == len(fig.data[0].x)
+        assert len(fig.data[0].marker.color) == len(fig.data[0].x)
 
     def test_marks_the_current_week(self):
         assert len(build_attrition_chart(ROWS, current_week=3).layout.shapes) >= 1
